@@ -3,3 +3,9 @@ PyAudioWPatch==0.2.12.8
 deepgram-sdk==3.7.1
 python-dotenv==1.2.2
 numpy==2.4.4
+faiss-cpu==1.13.2
+sentence-transformers==3.0.1
+rank_bm25==0.2.2
+langchain-google-genai==1.0.7
+pypdf==4.2.0
+tqdm==4.66.4

@@ -11,6 +11,9 @@ class DualAudioCaptureThread(QThread):
     """
     # Emits (sales_rep_rms, client_rms) to update UI safely
     audio_levels = pyqtSignal(float, float)
+    
+    # Broadcasts the raw batched stereo bytes for shipping to Deepgram
+    audio_data = pyqtSignal(bytes)
 
     def __init__(self):
         super().__init__()
@@ -132,7 +135,8 @@ class DualAudioCaptureThread(QThread):
                 stereo_interleaved = np.column_stack((rep_mono, client_mono)).astype(np.int16)
                 stereo_bytes = stereo_interleaved.tobytes()
 
-                # --- TODO: Send stereo_bytes over WebSocket to Deepgram ---
+                # Broadcast stereo chunks out to be consumed elsewhere (i.e. deeply coupled transcription sockets)
+                self.audio_data.emit(stereo_bytes)
 
                 # Calculate volume levels for the UI (RMS)
                 client_rms = float(np.sqrt(np.mean(np.square(client_mono.astype(np.float32))))) if len(client_mono) > 0 else 0.0

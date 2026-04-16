@@ -1,2 +1,5 @@
-PyQt6
-pyaudiowpatch
+PyQt6==6.11.0
+PyAudioWPatch==0.2.12.8
+deepgram-sdk==3.7.1
+python-dotenv==1.2.2
+numpy==2.4.4

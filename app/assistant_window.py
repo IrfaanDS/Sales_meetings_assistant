@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QLabel, QVBoxLayo
 from PyQt6.QtCore import Qt, QPoint, QRect
 from .styles import get_stylesheet
 from core.audio_engine import DualAudioCaptureThread
+from core.transcription_engine import TranscriptionEngine
 
 class AssistantDisplay(QMainWindow):
     """ The truly unclickable, transparent window displaying the text """
@@ -23,8 +24,17 @@ class AssistantDisplay(QMainWindow):
         self.layout.setContentsMargins(0, 5, 5, 5)
         
         self.label = QLabel("Meeting Assistant: Listening...")
-        self.label.setObjectName("TranscriptionLabel")
         self.layout.addWidget(self.label)
+        
+        # New rolling-window transcript label
+        self.transcript_label = QLabel("")
+        self.transcript_label.setWordWrap(True)
+        self.transcript_label.setObjectName("TranscriptionLabel")
+        self.transcript_label.setMinimumWidth(300)
+        self.layout.addWidget(self.transcript_label)
+        
+        self.transcript_history = []
+        self.current_interim = ""
         
         self.setStyleSheet(get_stylesheet())
 
@@ -39,7 +49,24 @@ class AssistantDisplay(QMainWindow):
         cli_lvl = min(max(cli_lvl, 0), 10)
         cli_bar = "█" * cli_lvl + "-" * (10 - cli_lvl)
         
-        self.label.setText(f"Mic (You): |{rep_bar}|  Sys (Client): |{cli_bar}|")
+        self.label.setText(f"Mic: |{rep_bar}|  Sys: |{cli_bar}|")
+
+    def update_transcript_visual(self, speaker, text, is_final):
+        line_format = f'<span style="color: {"#4db8ff" if speaker == "You" else "#69db7c"}"><b>{speaker}:</b></span> {text}'
+        
+        if is_final:
+            self.transcript_history.append(line_format)
+            self.current_interim = ""
+            if len(self.transcript_history) > 4: # keep the rolling window at last 4 lines
+                self.transcript_history.pop(0)
+        else:
+            self.current_interim = line_format
+            
+        display_lines = self.transcript_history.copy()
+        if self.current_interim:
+            display_lines.append(self.current_interim)
+            
+        self.transcript_label.setText("<br>".join(display_lines))
 
 class AssistantWindow(QMainWindow):
     """ The interactive handle window """
@@ -59,6 +86,15 @@ class AssistantWindow(QMainWindow):
         # Audio Listener (Dual Capture Strategy)
         self.audio_thread = DualAudioCaptureThread()
         self.audio_thread.audio_levels.connect(self.display_window.update_audio_visual)
+        
+        # Deepgram Transcription Thread
+        self.transcription_thread = TranscriptionEngine()
+        
+        # Crucial link: Pipe raw audio bytes directly into transcription socket
+        self.audio_thread.audio_data.connect(self.transcription_thread.feed_audio)
+        self.transcription_thread.new_transcript.connect(self.display_window.update_transcript_visual)
+        
+        self.transcription_thread.start()
         self.audio_thread.start()
         
         # UI
@@ -136,6 +172,8 @@ class AssistantWindow(QMainWindow):
     def closeEvent(self, event):
         if hasattr(self, 'audio_thread'):
             self.audio_thread.stop()
+        if hasattr(self, 'transcription_thread'):
+            self.transcription_thread.stop()
         self.display_window.close()
         super().closeEvent(event)
 

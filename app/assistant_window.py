@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, QPoint, QRect
 from .styles import get_stylesheet
 from core.audio_engine import DualAudioCaptureThread
 from core.transcription_engine import TranscriptionEngine
+from core.meeting_logger import MeetingLogger
 
 class AssistantDisplay(QMainWindow):
     """ The truly unclickable, transparent window displaying the text """
@@ -87,12 +88,15 @@ class AssistantWindow(QMainWindow):
         self.audio_thread = DualAudioCaptureThread()
         self.audio_thread.audio_levels.connect(self.display_window.update_audio_visual)
         
+        # Local Hard Drive Session Logger
+        self.meeting_logger = MeetingLogger()
+        
         # Deepgram Transcription Thread
         self.transcription_thread = TranscriptionEngine()
         
         # Crucial link: Pipe raw audio bytes directly into transcription socket
         self.audio_thread.audio_data.connect(self.transcription_thread.feed_audio)
-        self.transcription_thread.new_transcript.connect(self.display_window.update_transcript_visual)
+        self.transcription_thread.new_transcript.connect(self.handle_new_transcript)
         
         self.transcription_thread.start()
         self.audio_thread.start()
@@ -168,6 +172,14 @@ class AssistantWindow(QMainWindow):
         super().showEvent(event)
         self.display_window.show()
         self.update_display_position()
+
+    def handle_new_transcript(self, speaker, text, is_final):
+        # Pass visual render payload directly to HUD
+        self.display_window.update_transcript_visual(speaker, text, is_final)
+        
+        # Log to JSONL when sentence is finalized by endpointing
+        if is_final:
+            self.meeting_logger.log_utterance(speaker, text)
 
     def closeEvent(self, event):
         if hasattr(self, 'audio_thread'):

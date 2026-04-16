@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QLabel, QVBoxLayout, QScrollArea
 from PyQt6.QtCore import Qt, QPoint, QRect
 from .styles import get_stylesheet
 from core.audio_engine import DualAudioCaptureThread
@@ -27,15 +27,22 @@ class AssistantDisplay(QMainWindow):
         self.label = QLabel("Meeting Assistant: Listening...")
         self.layout.addWidget(self.label)
         
-        # New rolling-window transcript label
+        # New rolling-window transcript label wrapped in a scroll area
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setObjectName("TranscriptionScrollArea")
+        self.scroll_area.setMinimumSize(350, 150)
+        
         self.transcript_label = QLabel("")
         self.transcript_label.setWordWrap(True)
         self.transcript_label.setObjectName("TranscriptionLabel")
-        self.transcript_label.setMinimumWidth(300)
-        self.layout.addWidget(self.transcript_label)
+        self.transcript_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         
-        self.transcript_history = []
-        self.current_interim = ""
+        self.scroll_area.setWidget(self.transcript_label)
+        self.layout.addWidget(self.scroll_area)
+        
+        # State machine for chronological blocks
+        self.blocks = []
         
         self.setStyleSheet(get_stylesheet())
 
@@ -53,21 +60,78 @@ class AssistantDisplay(QMainWindow):
         self.label.setText(f"Mic: |{rep_bar}|  Sys: |{cli_bar}|")
 
     def update_transcript_visual(self, speaker, text, is_final):
-        line_format = f'<span style="color: {"#4db8ff" if speaker == "You" else "#69db7c"}"><b>{speaker}:</b></span> {text}'
+        # Find the last active block for this speaker
+        active_block = next((b for b in reversed(self.blocks) if b["speaker"] == speaker and b.get("is_active", False)), None)
         
+        if not active_block:
+            active_block = {"speaker": speaker, "final": [], "interim": "", "is_active": True}
+            self.blocks.append(active_block)
+            
         if is_final:
-            self.transcript_history.append(line_format)
-            self.current_interim = ""
-            if len(self.transcript_history) > 4: # keep the rolling window at last 4 lines
-                self.transcript_history.pop(0)
+            active_block["final"].append(text.strip())
+            active_block["interim"] = ""
+            
+            # Since this speaker finished a statement, we can close the OTHER speakers' active blocks IF they have some final text.
+            for b in self.blocks:
+                if b["speaker"] != speaker and b["is_active"] and len(b["final"]) > 0:
+                    b["is_active"] = False
         else:
-            self.current_interim = line_format
+            active_block["interim"] = text.strip()
             
-        display_lines = self.transcript_history.copy()
-        if self.current_interim:
-            display_lines.append(self.current_interim)
+        # Clean up old blocks (keep last 5 to avoid filling the screen too much)
+        if len(self.blocks) > 5:
+            self.blocks = self.blocks[-5:]
             
-        self.transcript_label.setText("<br>".join(display_lines))
+        # Render
+        display_lines = []
+        for b in self.blocks:
+            combined = " ".join(b["final"])
+            if b["interim"]:
+                combined += (" " if combined else "") + b["interim"]
+                
+            if combined.strip():
+                color = "#4db8ff" if b["speaker"] == "You" else "#69db7c"
+                display_lines.append(f'<span style="color: {color}"><b>{b["speaker"]}:</b></span> {combined.strip()}')
+                
+        self.transcript_label.setText("<br><br>".join(display_lines))
+        
+        # Auto-scroll to bottom
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(10, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()
+        ))
+
+class ResizeHandle(QLabel):
+    def __init__(self, target_window):
+        super().__init__("↘")
+        self.target_window = target_window
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        self.setObjectName("ResizeHandle")
+        self._dragging = False
+        self._start_global_pos = None
+        self._start_size = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            self._start_global_pos = event.globalPosition()
+            self._start_size = self.target_window.display_window.scroll_area.size()
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            current_global_pos = event.globalPosition()
+            delta = current_global_pos - self._start_global_pos
+            
+            new_w = max(250, self._start_size.width() + int(delta.x()))
+            new_h = max(100, self._start_size.height() + int(delta.y()))
+            
+            self.target_window.display_window.scroll_area.setFixedSize(new_w, new_h)
+            self.target_window.display_window.adjustSize()
+            self.target_window.update_display_position()
+
+    def mouseReleaseEvent(self, event):
+        self._dragging = False
 
 class AssistantWindow(QMainWindow):
     """ The interactive handle window """
@@ -127,8 +191,12 @@ class AssistantWindow(QMainWindow):
         self.handle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.handle.setObjectName("Handle")
         
+        # The resize handle
+        self.resize_handle = ResizeHandle(self)
+        
         self.handle_layout.addWidget(self.close_btn)
         self.handle_layout.addWidget(self.handle)
+        self.handle_layout.addWidget(self.resize_handle)
         
         self.layout.addWidget(self.handle_container)
         

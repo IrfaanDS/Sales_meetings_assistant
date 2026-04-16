@@ -186,6 +186,8 @@ class AssistantWindow(QMainWindow):
             self.audio_thread.stop()
         if hasattr(self, 'transcription_thread'):
             self.transcription_thread.stop()
+        if hasattr(self, 'meeting_logger'):
+            self.meeting_logger.flush()
         self.display_window.close()
         super().closeEvent(event)
 

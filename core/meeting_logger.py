@@ -11,25 +11,44 @@ class MeetingLogger:
         # Create a unique file for this session based on start time
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.log_file = os.path.join(self.logs_dir, f"meeting_{start_time}.jsonl")
+        
+        # Aggregation state
+        self.current_speaker = None
+        self.aggregated_text = []
+        self.current_timestamp = None
+        
         print(f"Logging conversation to {self.log_file}")
 
     def log_utterance(self, speaker: str, text: str):
         """
-        Logs a final utterance to the JSON Lines payload.
-        speaker is 'You' or 'Client'.
+        Logs a final utterance. If the speaker is the same, it aggregates.
         """
         if not text.strip():
             return
-            
-        timestamp = datetime.now().isoformat(timespec='seconds')
-        
-        # Map frontend speaker display names to generic backend tags requested by user
-        channel = "rep" if speaker == "You" else "client"
-        
+
+        # If speaker changed, flush the previous block
+        if self.current_speaker is not None and self.current_speaker != speaker:
+            self.flush()
+
+        # Start new block if needed
+        if self.current_speaker is None:
+            self.current_speaker = speaker
+            self.current_timestamp = datetime.now().isoformat(timespec='seconds')
+
+        self.aggregated_text.append(text.strip())
+
+    def flush(self):
+        """Writes the current buffered block to the file."""
+        if not self.aggregated_text:
+            return
+
+        channel = "rep" if self.current_speaker == "You" else "client"
+        full_text = " ".join(self.aggregated_text)
+
         log_entry = {
-            "timestamp": timestamp,
+            "timestamp": self.current_timestamp,
             "channel": channel,
-            "text": text.strip()
+            "text": full_text
         }
         
         try:
@@ -37,3 +56,9 @@ class MeetingLogger:
                 f.write(json.dumps(log_entry) + "\n")
         except Exception as e:
             print(f"File log error: {e}")
+
+        # Reset buffer
+        self.aggregated_text = []
+        self.current_speaker = None
+        self.current_timestamp = None
+

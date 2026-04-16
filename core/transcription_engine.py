@@ -86,23 +86,25 @@ class TranscriptionEngine(QThread):
                 encoding="linear16", 
                 sample_rate=44100, 
                 interim_results=True,     # Stream word-by-word
-                endpointing=200,          # Triggers finalization rapidly when speaking pauses
-                smart_format=True
+                endpointing=100,          # Reduced from 200 to 100ms for even faster "Final" tags
+                smart_format=True,
+                utterance_end_ms=1000,    # Helps finalize silent blocks
+                vad_events=True
             )
 
-            # Connect and keep thread alive
+            # Connect
             if self.dg_connection.start(options) is False:
                 print("Failed to start Deepgram connection")
                 return
 
             print("Deepgram WebSocket Live Connection Established.")
             
-            # The Deepgram client maintains the WebSocket in the background.
-            # This loop keeps our QThread alive so we can keep passing audio chunks.
-            while self._running:
-                self.msleep(100) # Sleep softly to keep QThread active
+            # Start the QThread event loop. This is critical for latency!
+            # Using exec() instead of a while True loop allows this thread to 
+            # process the 'feed_audio' signals as soon as they are emitted from the audio thread.
+            self.exec()
 
-            # If stopped, properly shutdown
+            # Cleanup
             self.dg_connection.finish()
 
         except Exception as e:
@@ -110,4 +112,6 @@ class TranscriptionEngine(QThread):
 
     def stop(self):
         self._running = False
+        self.quit() # Signals the exec() loop to exit
         self.wait(500)
+

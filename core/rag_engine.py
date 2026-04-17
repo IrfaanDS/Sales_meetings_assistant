@@ -9,7 +9,7 @@ from typing import List, Dict, Optional
 from pypdf import PdfReader
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from PyQt6.QtCore import QThread, pyqtSignal
 from dotenv import load_dotenv
 
@@ -26,13 +26,13 @@ Retrieved Context: Snippets from the project’s knowledge base.
 
 Task Instructions:
 1. Identify Intent: Detect the client's core question or technical concern.
-2. Script Generation: Write a response that the rep can speak immediately. It must be conversational, authoritative, and brief (max 40 words).
+2. Script Generation: Write a response that the rep can speak immediately. It must be conversational, authoritative, and brief (40-60 words).
 
 CRITICAL CONSTRAINTS (The Golden Rules):
 - NEVER ask a follow-up question. Your output is the ANSWER to the client's question.
 - DO NOT engage in a dialogue with the sales rep.
 - BE INVISIBLE: Never say "The document states" or "Here is a script." Start directly with the suggested response.
-- FORMAT FOR SPEED: Use short sentences or 1-2 bullet points.
+- FORMAT FOR SPEED
 - ACCURACY: If the context doesn't contain the answer, say "I don't have information on that specific detail yet" as a script for the rep.
 """
 
@@ -89,7 +89,7 @@ class HybridEngine:
         self.faiss_index.add(embs.astype('float32'))
         print("✅ Engine ready!")
 
-    async def retrieve(self, query: str, k: int = 4):
+    async def retrieve(self, query: str, k: int = 2):
         if not self.chunks:
             return []
         v_task = asyncio.to_thread(self._v_search, query, k*2)
@@ -110,18 +110,18 @@ class HybridEngine:
         return np.argsort(self.bm25.get_scores(q.lower().split()))[-k:][::-1].tolist()
 
 class SalesAssistant:
-    def __init__(self, engine: HybridEngine, model="gemini-3-flash-preview", system_prompt: str = DEFAULT_SYSTEM_PROMPT):
+    def __init__(self, engine: HybridEngine, model="llama-3.3-70b-versatile", system_prompt: str = DEFAULT_SYSTEM_PROMPT):
         self.engine = engine
         self.model_name = model
         self.system_prompt = system_prompt
-        # Move LLM initialization to stream_ask to ensure it happens on the right event loop thread
 
     async def stream_ask(self, query: str, emit_func):
-        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-        llm = ChatGoogleGenerativeAI(
+        api_key = os.environ.get("GROQ_API_KEY")
+        # Initialize Groq LLM (optimized for speed)
+        llm = ChatGroq(
             model=self.model_name, 
-            streaming=True, 
-            google_api_key=api_key
+            temperature=0,
+            groq_api_key=api_key
         )
         
         ctx = "\n---\n".join(await self.engine.retrieve(query))

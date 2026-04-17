@@ -62,3 +62,17 @@ class MeetingLogger:
         self.current_speaker = None
         self.current_timestamp = None
 
+    def log_rag_interaction(self, question: str, answer: str):
+        """Logs an AI Q&A interaction."""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(timespec='seconds'),
+            "channel": "ai_assistant",
+            "question": question,
+            "answer": answer
+        }
+        try:
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except Exception as e:
+            print(f"File log error (RAG): {e}")
+

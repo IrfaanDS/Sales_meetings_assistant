@@ -78,6 +78,10 @@ class AssistantDisplay(QMainWindow):
         # State machine for chronological blocks
         self.blocks = []
         
+        # Track RAG interactions for logging
+        self.last_rag_question = ""
+        self.last_rag_answer = ""
+        
         self.setStyleSheet(get_stylesheet())
 
     def update_audio_visual(self, rep_rms, client_rms):
@@ -132,20 +136,16 @@ class AssistantDisplay(QMainWindow):
         ))
 
     def append_user_query(self, query):
-        current_text = self.script_label.text()
-        if "Ask a question" in current_text:
-            current_text = ""
-        else:
-            current_text += "<br><br>"
-            
-        # Format user query using HTML
-        current_text += f'<span style="color: #4db8ff"><b>Q:</b> {query}</span><br><span style="color: #FFA500"><b>A:</b> </span>'
-        self.script_label.setText(current_text)
+        # Reset answer for the new query
+        self.last_rag_answer = ""
+        # Overwrite the script label to keep the window clean
+        new_header = f'<span style="color: #4db8ff"><b>Q:</b> {query}</span><br><span style="color: #FFA500"><b>A:</b> </span>'
+        self.script_label.setText(new_header)
         self._scroll_script_to_bottom()
 
     def append_script_chunk(self, chunk):
+        self.last_rag_answer += chunk
         current_text = self.script_label.text()
-        # Escape minimal HTML if necessary, or just replace newlines
         html_chunk = chunk.replace('\\n', '<br>').replace('\n', '<br>')
         self.script_label.setText(current_text + html_chunk)
         self._scroll_script_to_bottom()
@@ -286,6 +286,9 @@ class AssistantWindow(QMainWindow):
         self.query_input.clear()
         self.query_input.setEnabled(False)
         self.query_input.setPlaceholderText("Thinking...")
+        
+        # Track for logging
+        self.display_window.last_rag_question = query
         self.display_window.append_user_query(query)
         
         self.query_thread = RAGQueryThread(self.rag_assistant, query)
@@ -298,6 +301,12 @@ class AssistantWindow(QMainWindow):
         self.query_input.setPlaceholderText("Ask AI...")
         self.query_input.setFocus()
         self.display_window.finalize_script_chunk()
+        
+        # Log to file
+        self.meeting_logger.log_rag_interaction(
+            self.display_window.last_rag_question, 
+            self.display_window.last_rag_answer
+        )
 
     def close_app(self):
         self.close()

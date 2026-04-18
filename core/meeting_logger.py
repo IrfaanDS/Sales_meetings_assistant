@@ -16,6 +16,7 @@ class MeetingLogger:
         self.current_speaker = None
         self.aggregated_text = []
         self.current_timestamp = None
+        self.history = [] # In-memory history for RAG context
         
         print(f"Logging conversation to {self.log_file}")
 
@@ -36,6 +37,11 @@ class MeetingLogger:
             self.current_timestamp = datetime.now().isoformat(timespec='seconds')
 
         self.aggregated_text.append(text.strip())
+        # Also add to in-memory history for context retrieval
+        self.history.append({"speaker": speaker, "text": text.strip(), "timestamp": datetime.now().isoformat()})
+
+    def get_history(self):
+        return self.history
 
     def flush(self):
         """Writes the current buffered block to the file."""

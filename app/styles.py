@@ -43,22 +43,37 @@ def get_stylesheet():
     }
 
     #TranscriptionLabel {
-        color: #ffffff;
-        font-family: 'Segoe UI', Roboto, sans-serif;
-        font-size: 18px;
-        font-weight: 500;
-        padding: 5px;
+        color: #f0f0f0;
+        font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
+        font-size: 15px;
+        font-weight: 400;
+        padding: 12px;
         background-color: transparent;
     }
 
     #TranscriptionScrollArea {
-        background-color: rgba(0, 0, 0, 0.4);
+        background-color: rgba(20, 20, 20, 0.75);
         border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.15);
     }
 
     QScrollArea QWidget {
         background-color: transparent;
+    }
+    
+    QLineEdit {
+        background-color: rgba(30, 30, 30, 0.8);
+        color: white;
+        border: 1px solid #555;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
+        font-size: 13px;
+    }
+    
+    QLineEdit:focus {
+        border: 1px solid #4db8ff;
+        background-color: rgba(40, 40, 40, 0.9);
     }
 
     QScrollBar:vertical {

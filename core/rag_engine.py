@@ -135,7 +135,65 @@ class SalesAssistant:
             print(f"❌ Model error: {e}")
 
 
+class IntentGatekeeper:
+    def __init__(self):
+        self.api_key = os.getenv("GOOGLE_API_KEY")
+        if self.api_key:
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel('gemini-2.5-flash')
+
+    async def classify_intent(self, text: str) -> bool:
+        """
+        Classifies if the text is a Question/Pain Point (True) or Chitchat/Feedback (False).
+        """
+        if not self.api_key or not text.strip():
+            return False
+
+        prompt = f"""
+        Analyze the following transcript segment from a client in a sales meeting.
+        Classify it into one of two categories:
+        1. QUESTION_OR_PAIN_POINT: The client is asking a question, expressing a concern, or stating a requirement.
+        2. CHITCHAT_OR_FEEDBACK: The client is making small talk, saying "I see," "That makes sense," or providing non-actionable feedback.
+
+        Respond with ONLY the word "TRUE" for category 1 or "FALSE" for category 2.
+
+        Transcript: "{text}"
+        Result:"""
+
+        try:
+            # Run in a thread to avoid blocking the event loop if needed, 
+            # though gemini-1.5-flash is very fast.
+            response = await asyncio.to_thread(
+                self.model.generate_content, 
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0,
+                    max_output_tokens=5
+                )
+            )
+            result = response.text.strip().upper()
+            return "TRUE" in result
+        except Exception as e:
+            print(f"Gatekeeper Error: {e}")
+            return False
+
+
 # --- PyQt6 QThreads for background execution ---
+
+class IntentGatekeeperThread(QThread):
+    intent_detected = pyqtSignal(bool, str) # (is_high_intent, transcript)
+
+    def __init__(self, gatekeeper: IntentGatekeeper, transcript: str):
+        super().__init__()
+        self.gatekeeper = gatekeeper
+        self.transcript = transcript
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        is_high_intent = loop.run_until_complete(self.gatekeeper.classify_intent(self.transcript))
+        self.intent_detected.emit(is_high_intent, self.transcript)
+        loop.close()
 
 
 class RAGIndexThread(QThread):
@@ -161,14 +219,22 @@ class RAGIndexThread(QThread):
             self.error.emit(str(e))
 
 
+class CancelledError(Exception):
+    pass
+
 class RAGQueryThread(QThread):
     chunk_received = pyqtSignal(str)
     completed = pyqtSignal()
 
-    def __init__(self, assistant: SalesAssistant, query: str):
+    def __init__(self, assistant: SalesAssistant, query: str, is_manual: bool = False):
         super().__init__()
         self.assistant = assistant
         self.query = query
+        self.is_manual = is_manual
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
 
     def run(self):
         if not self.assistant:
@@ -177,11 +243,26 @@ class RAGQueryThread(QThread):
             return
             
         def emitter(chunk_text):
+            if self._is_cancelled:
+                raise CancelledError("Query cancelled")
             self.chunk_received.emit(chunk_text)
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(self.assistant.stream_ask(self.query, emitter))
-        loop.close()
-        self.completed.emit()
+        
+        try:
+            if self.is_manual:
+                prompt = f"The rep manually requested help here. Summarize the client's last point and provide a rebuttal based on the context.\n\nContext Fragment: {self.query}"
+                # We reuse stream_ask but could customize it for manual refined prompts
+                loop.run_until_complete(self.assistant.stream_ask(self.query, emitter))
+            else:
+                loop.run_until_complete(self.assistant.stream_ask(self.query, emitter))
+        except CancelledError:
+            pass
+        except Exception as e:
+            print(f"RAGQueryThread error: {e}")
+        finally:
+            loop.close()
+            if not self._is_cancelled:
+                self.completed.emit()
 

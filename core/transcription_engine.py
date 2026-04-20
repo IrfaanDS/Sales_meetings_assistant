@@ -60,11 +60,18 @@ class TranscriptionEngine(QThread):
                     except:
                         ch_idx = 0
                 
-                is_final = getattr(result, "is_final", False) or getattr(result, "speech_final", False)
+                # Use speech_final (if available) for better debouncing, fallback to is_final
+                speech_final = getattr(result, "speech_final", False)
+                is_final_attr = getattr(result, "is_final", False)
+                
+                # We emit both as our 'is_final' flag if it's truly the end of a thought
+                # Since we configured utterance_end_ms, speech_final is the more reliable marker.
+                true_final = speech_final or is_final_attr
+                
                 speaker_name = "You" if ch_idx == 0 else "Client"
 
                 # Use the engine_self closure to reach the QThread signal
-                engine_self.new_transcript.emit(speaker_name, transcript, bool(is_final))
+                engine_self.new_transcript.emit(speaker_name, transcript, bool(true_final))
 
             def on_error(dg_client, error, **kwargs):
                 print(f"Deepgram WebSocket Error: {error}")

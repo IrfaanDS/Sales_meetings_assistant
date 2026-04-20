@@ -1,39 +1,67 @@
 import os
 import time
 import asyncio
-import numpy as np
-import faiss
 import nest_asyncio
 import google.generativeai as genai
 from typing import List, Dict, Optional
 from pypdf import PdfReader
-from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
 from langchain_groq import ChatGroq
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from dotenv import load_dotenv
+
+from core.vector_store import QdrantVectorStore, get_vector_store
 
 nest_asyncio.apply()
 load_dotenv()
 
 # Configure LLM default system prompt
 DEFAULT_SYSTEM_PROMPT = """
-Role: You are the Sales Intelligence Co-Pilot. Your goal is to provide the sales representative with a direct "response script" to read aloud to the client in real-time.
+Role: You are a real-time Sales Response Generator. Your job is to produce a precise, speakable answer that the sales rep can read aloud directly to the client.
 
 Input Context:
-Live Transcript: Speech from the client (often messy or accented).
-Retrieved Context: Snippets from the project’s knowledge base.
+- Live Transcript: Client speech (may be messy or incomplete)
+- Retrieved Context: Verified knowledge base snippets
 
-Task Instructions:
-1. Identify Intent: Detect the client's core question or technical concern.
-2. Script Generation: Write a response that the rep can speak immediately. It must be conversational, authoritative, and brief (40-60 words).
+Core Task:
+1. Detect the client’s intent (question, concern, objection, or interest)
+2. Generate a clear, direct answer using ONLY the provided context
 
-CRITICAL CONSTRAINTS (The Golden Rules):
-- NEVER ask a follow-up question. Your output is the ANSWER to the client's question.
-- DO NOT engage in a dialogue with the sales rep.
-- BE INVISIBLE: Never say "The document states" or "Here is a script." Start directly with the suggested response.
-- FORMAT FOR SPEED
-- ACCURACY: If the context doesn't contain the answer, say "I don't have information on that specific detail yet" as a script for the rep.
+OUTPUT STYLE (STRICT):
+- Length: 60–100 words MAX
+- Format: 1–2 short paragraphs
+- Speakable: Short, natural sentences (no rambling)
+- Tone: Confident, neutral, professional
+- NO filler phrases (e.g., "I understand", "Absolutely", "Great question", etc.)
+- NO hype language or exaggerated sales tone
+
+STRUCTURE:
+- Start directly with the answer (no acknowledgments)
+- Deliver the core information clearly
+- Briefly connect to value (efficiency, reliability, outcome)
+- End cleanly
+
+CRITICAL RULES:
+- ZERO BLUFFING: Use ONLY retrieved context. Do NOT invent anything.
+- NO FOLLOW-UP QUESTIONS under any circumstances
+- NO dialogue, no coaching, no explanations
+- DO NOT mention context, documents, or that you are an AI
+- DO NOT add greetings unless the client greeting is explicit
+
+UNCERTAINTY HANDLING:
+- If the answer is partially available:
+  → Provide the known part, then say:
+  "I’ll confirm the remaining details and follow up shortly."
+- If the answer is not in the context:
+  → Say:
+  "I’ll verify that detail internally and follow up shortly."
+- Do NOT guess or expand beyond context
+
+EDGE CASE:
+- If the client greeting is simple (e.g., "hi", "hello"):
+  → Respond briefly with a greeting only
+
+GOAL:
+Produce a tight, confident answer the rep can read verbatim without sounding scripted or verbose.
 """
 
 class DocumentProcessor:
@@ -74,58 +102,40 @@ class DocumentProcessor:
             if start >= end: start = end + 1
         return chunks
 
-class HybridEngine:
-    def __init__(self, chunks: List[str]):
-        self.chunks, self.embed_model = chunks, SentenceTransformer('all-MiniLM-L6-v2')
-        self.bm25, self.faiss_index = None, None
-        self._build()
-
-    def _build(self):
-        if not self.chunks: return print("No chunks to index!")
-        print(f"Indexing {len(self.chunks)} fragments...")
-        self.bm25 = BM25Okapi([d.lower().split() for d in self.chunks])
-        embs = self.embed_model.encode(self.chunks, show_progress_bar=False)
-        self.faiss_index = faiss.IndexFlatL2(embs.shape[1])
-        self.faiss_index.add(embs.astype('float32'))
-        print("✅ Engine ready!")
-
-    async def retrieve(self, query: str, k: int = 2):
-        if not self.chunks:
-            return []
-        v_task = asyncio.to_thread(self._v_search, query, k*2)
-        k_task = asyncio.to_thread(self._k_search, query, k*2)
-        v_res, k_res = await asyncio.gather(v_task, k_task)
-        ranks = {}
-        for i, idx in enumerate(v_res): ranks[idx] = ranks.get(idx, 0) + 1.0/(60+i)
-        for i, idx in enumerate(k_res): ranks[idx] = ranks.get(idx, 0) + 1.0/(60+i)
-        top = sorted(ranks.keys(), key=ranks.get, reverse=True)[:k]
-        return [self.chunks[i] for i in top if i != -1]
-
-    def _v_search(self, q, k): 
-        if self.faiss_index is None: return []
-        return self.faiss_index.search(self.embed_model.encode([q]).astype('float32'), k)[1][0].tolist()
-        
-    def _k_search(self, q, k): 
-        if self.bm25 is None: return []
-        return np.argsort(self.bm25.get_scores(q.lower().split()))[-k:][::-1].tolist()
-
 class SalesAssistant:
-    def __init__(self, engine: HybridEngine, model="llama-3.3-70b-versatile", system_prompt: str = DEFAULT_SYSTEM_PROMPT):
-        self.engine = engine
+    def __init__(self, store: QdrantVectorStore, model="llama-3.3-70b-versatile", system_prompt: str = DEFAULT_SYSTEM_PROMPT):
+        self.store = store
         self.model_name = model
         self.system_prompt = system_prompt
 
-    async def stream_ask(self, query: str, emit_func):
+    async def stream_ask(self, query: str, context_window: str, emit_func, source_emit_func):
         api_key = os.environ.get("GROQ_API_KEY")
-        # Initialize Groq LLM (optimized for speed)
         llm = ChatGroq(
             model=self.model_name, 
             temperature=0,
-            groq_api_key=api_key
+            groq_api_key=api_key,
+            streaming=True,
+            model_kwargs={"stream": True}
         )
         
-        ctx = "\n---\n".join(await self.engine.retrieve(query))
-        prompt = f"{self.system_prompt}\n\nContext: {ctx}\n\nQuery: {query}\n\nSales Response:"
+        # Retrieve from Qdrant
+        results = await asyncio.to_thread(self.store.search, query, 3)
+        
+        ctx_texts = []
+        sources = []
+        for r in results:
+            ctx_texts.append(r["text"])
+            if r["filename"] not in sources:
+                sources.append(r["filename"])
+                
+        ctx_block = "\n---\n".join(ctx_texts)
+        
+        # Construct the prompt with the sliding context window
+        prompt = f"{self.system_prompt}\n\nRecent Conversation Context:\n{context_window}\n\nRetrieved Knowledge Base Context:\n{ctx_block}\n\nClient's Last Statement/Query: {query}\n\nSales Response:"
+        
+        # Emit the sources first
+        if sources:
+            source_emit_func(f"<br><span style='color:#808080; font-size:11px;'><br><b>Sources:</b> {', '.join(sources)}</span><br><br>")
         
         try:
             async for chunk in llm.astream(prompt): 
@@ -200,22 +210,29 @@ class RAGIndexThread(QThread):
     finished = pyqtSignal(object)  # Emits the SalesAssistant instance upon completion
     error = pyqtSignal(str)
 
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str = None):
         super().__init__()
         self.file_path = file_path
 
     def run(self):
         try:
-            processor = DocumentProcessor()
-            if self.file_path:
+            # Initialize Qdrant Store (will use existing db if Present)
+            store = get_vector_store()
+
+            # Upsert new document if provided
+            if self.file_path and os.path.exists(self.file_path):
+                processor = DocumentProcessor()
                 chunks = processor.load_file(self.file_path)
-            else:
-                chunks = []
+                filename = os.path.basename(self.file_path)
                 
-            engine = HybridEngine(chunks)
-            assistant = SalesAssistant(engine)
+                # Check if it's already there to avoid dupes? Qdrant allows overwrites but
+                # we just upsert new UUIDs for now, simplifying. Let's assume user wants to add it.
+                store.upsert_chunks(chunks, filename)
+
+            assistant = SalesAssistant(store)
             self.finished.emit(assistant)
         except Exception as e:
+            print(f"Index error: {e}")
             self.error.emit(str(e))
 
 
@@ -224,12 +241,14 @@ class CancelledError(Exception):
 
 class RAGQueryThread(QThread):
     chunk_received = pyqtSignal(str)
+    source_received = pyqtSignal(str)
     completed = pyqtSignal()
 
-    def __init__(self, assistant: SalesAssistant, query: str, is_manual: bool = False):
+    def __init__(self, assistant: SalesAssistant, query: str, context_window: str = "", is_manual: bool = False):
         super().__init__()
         self.assistant = assistant
         self.query = query
+        self.context_window = context_window
         self.is_manual = is_manual
         self._is_cancelled = False
 
@@ -247,16 +266,22 @@ class RAGQueryThread(QThread):
                 raise CancelledError("Query cancelled")
             self.chunk_received.emit(chunk_text)
 
+        def source_emitter(src_text):
+            if self._is_cancelled:
+                raise CancelledError("Query cancelled")
+            self.source_received.emit(src_text)
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         try:
             if self.is_manual:
-                prompt = f"The rep manually requested help here. Summarize the client's last point and provide a rebuttal based on the context.\n\nContext Fragment: {self.query}"
-                # We reuse stream_ask but could customize it for manual refined prompts
-                loop.run_until_complete(self.assistant.stream_ask(self.query, emitter))
-            else:
-                loop.run_until_complete(self.assistant.stream_ask(self.query, emitter))
+                # Add refinement hint
+                self.query = f"[Manual Refinement Needed]: {self.query}"
+            
+            loop.run_until_complete(
+                self.assistant.stream_ask(self.query, self.context_window, emitter, source_emitter)
+            )
         except CancelledError:
             pass
         except Exception as e:

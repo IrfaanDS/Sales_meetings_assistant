@@ -43,6 +43,28 @@ class MeetingLogger:
     def get_history(self):
         return self.history
 
+    def get_clean_transcript(self, include_ai=False):
+        """Returns a nicely formatted string of the conversation."""
+        lines = []
+        for entry in self.history:
+            speaker = entry.get("speaker", "Unknown")
+            text = entry.get("text", "")
+            # Filter for just the sales rep and client
+            if speaker in ["You", "Client"]:
+                # Clarify the labels
+                display_speaker = "Sales Rep" if speaker == "You" else "Client"
+                lines.append(f"{display_speaker}:\n{text}\n")
+        return "\n".join(lines)
+
+    def get_recent_context_window(self, n=4) -> str:
+        """Returns the last N utterances as a formatted string for LLM context."""
+        recent = self.history[-n:]
+        lines = []
+        for entry in recent:
+            if entry.get("speaker") in ["You", "Client"]:
+                lines.append(f"{entry.get('speaker')}: {entry.get('text')}")
+        return "\n".join(lines)
+
     def flush(self):
         """Writes the current buffered block to the file."""
         if not self.aggregated_text:

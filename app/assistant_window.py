@@ -1,7 +1,7 @@
 import threading
 from pynput import keyboard
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QLabel, QVBoxLayout, QScrollArea, QLineEdit, QPushButton, QGraphicsOpacityEffect
-from PyQt6.QtCore import Qt, QPoint, QRect, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtCore import Qt, QPoint, QRect, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor
 from .styles import get_stylesheet
 from core.audio_engine import DualAudioCaptureThread
@@ -248,6 +248,8 @@ class ResizeHandle(QLabel):
 
 class AssistantWindow(QMainWindow):
     """ The interactive handle window """
+    session_ended = pyqtSignal(str) # Emits the clean transcript
+
     def __init__(self, rag_assistant: SalesAssistant = None):
         super().__init__()
         self.rag_assistant = rag_assistant
@@ -261,6 +263,11 @@ class AssistantWindow(QMainWindow):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        self.debounce_timer = QTimer()
+        self.debounce_timer.setSingleShot(True)
+        self.debounce_timer.timeout.connect(self._trigger_gatekeeper)
+        self.pending_text = ""
         
         self.display_window = AssistantDisplay()
         self.audio_thread = DualAudioCaptureThread()
@@ -296,9 +303,15 @@ class AssistantWindow(QMainWindow):
         self.query_input.setStyleSheet("background-color: rgba(20,20,20,200); color: white; border: 1px solid #444; border-radius: 4px; padding: 3px;")
         if not self.rag_assistant: self.query_input.setEnabled(False)
         self.query_input.returnPressed.connect(self.submit_query)
+
+        self.end_session_btn = QPushButton("🛑")
+        self.end_session_btn.setObjectName("EndButton")
+        self.end_session_btn.setFixedSize(30, 30)
+        self.end_session_btn.setToolTip("End Session")
+        self.end_session_btn.clicked.connect(self.end_session)
         
         self.resize_handle = ResizeHandle(self)
-        self.handle_layout.addWidget(self.close_btn); self.handle_layout.addWidget(self.handle); self.handle_layout.addWidget(self.query_input); self.handle_layout.addWidget(self.resize_handle)
+        self.handle_layout.addWidget(self.close_btn); self.handle_layout.addWidget(self.handle); self.handle_layout.addWidget(self.query_input); self.handle_layout.addWidget(self.end_session_btn); self.handle_layout.addWidget(self.resize_handle)
         self.layout.addWidget(self.handle_container)
         
         self.setStyleSheet(get_stylesheet())
@@ -329,15 +342,23 @@ class AssistantWindow(QMainWindow):
         if is_final:
             self.meeting_logger.log_utterance(speaker, text)
             if speaker == "Client" and self.rag_assistant:
-                # Debounce check: skip if gatekeeper or a query is running
-                if self.gatekeeper_thread and self.gatekeeper_thread.isRunning(): return
-                if self.query_thread and self.query_thread.isRunning(): return
-                
-                # Fire the Gatekeeper
-                self.display_window.set_status("detecting")
-                self.gatekeeper_thread = IntentGatekeeperThread(self.gatekeeper, text)
-                self.gatekeeper_thread.intent_detected.connect(self.on_intent_detected)
-                self.gatekeeper_thread.start()
+                self.pending_text += " " + text
+                # Debounce for 1.5 seconds
+                self.debounce_timer.start(1500)
+
+    def _trigger_gatekeeper(self):
+        text = self.pending_text.strip()
+        self.pending_text = ""
+        if not text: return
+        
+        if self.gatekeeper_thread and self.gatekeeper_thread.isRunning(): return
+        if self.query_thread and self.query_thread.isRunning(): return
+        
+        # Fire the Gatekeeper
+        self.display_window.set_status("detecting")
+        self.gatekeeper_thread = IntentGatekeeperThread(self.gatekeeper, text)
+        self.gatekeeper_thread.intent_detected.connect(self.on_intent_detected)
+        self.gatekeeper_thread.start()
 
     def on_intent_detected(self, is_high_intent, transcript):
         if is_high_intent:
@@ -357,8 +378,11 @@ class AssistantWindow(QMainWindow):
         self.display_window.set_status("thinking")
         self.display_window.prepare_script_view(query if is_manual else None, is_manual)
         
-        self.query_thread = RAGQueryThread(self.rag_assistant, query, is_manual=is_manual)
+        context_window = self.meeting_logger.get_recent_context_window(n=4)
+        
+        self.query_thread = RAGQueryThread(self.rag_assistant, query, context_window=context_window, is_manual=is_manual)
         self.query_thread.chunk_received.connect(self.display_window.append_script_chunk)
+        self.query_thread.source_received.connect(self.display_window.append_script_chunk)
         self.query_thread.completed.connect(self.on_query_completed)
         self.query_thread.start()
 
@@ -367,6 +391,11 @@ class AssistantWindow(QMainWindow):
         self.display_window.set_status("idle")
         self.display_window.finalize_script_chunk()
         self.meeting_logger.log_rag_interaction("Context Inquiry", self.display_window.last_rag_answer)
+
+    def end_session(self):
+        clean_transcript = self.meeting_logger.get_clean_transcript(include_ai=False)
+        self.session_ended.emit(clean_transcript)
+        self.close()
 
     def close_app(self):
         self.close()

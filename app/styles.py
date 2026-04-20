@@ -42,6 +42,20 @@ def get_stylesheet():
         background-color: rgba(220, 50, 50, 1.0);
     }
 
+    #EndButton {
+        background-color: rgba(200, 50, 50, 0.7);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 15px;
+        font-weight: bold;
+        padding: 5px 10px;
+    }
+    
+    #EndButton:hover {
+        background-color: rgba(220, 50, 50, 1.0);
+    }
+
     #TranscriptionLabel {
         color: #f0f0f0;
         font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;

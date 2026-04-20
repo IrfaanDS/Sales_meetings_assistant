@@ -1,9 +1,10 @@
 import os
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QTextEdit
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QTextEdit, QSystemTrayIcon, QMenu, QStyle
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon, QAction
 from qfluentwidgets import (
     setTheme, Theme, PrimaryPushButton, PushButton, 
-    SubtitleLabel, BodyLabel, ListWidget, InfoBar, InfoBarPosition, ProgressBar
+    SubtitleLabel, BodyLabel, ListWidget, InfoBar, InfoBarPosition, ProgressBar, CheckBox
 )
 
 from app.assistant_window import AssistantWindow
@@ -19,6 +20,23 @@ class WelcomeWindow(QMainWindow):
         self.setWindowTitle("AI Sales Meeting Assistant")
         self.resize(550, 400)
         
+        # System Tray Setup
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
+        
+        tray_menu = QMenu()
+        show_action = QAction("Show Dashboard", self)
+        show_action.triggered.connect(self.show)
+        exit_action = QAction("Exit App", self)
+        exit_action.triggered.connect(self.close)
+        
+        tray_menu.addAction(show_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(exit_action)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
+
         # Initialize Vector Store
         try:
             self.store = get_vector_store()
@@ -46,17 +64,41 @@ class WelcomeWindow(QMainWindow):
         self.layout.addWidget(self.title)
         self.layout.addWidget(self.desc)
         
-        # Dashboard: Stored Documents
-        self.doc_header = BodyLabel("Knowledge Base Documents:", self)
-        self.layout.addWidget(self.doc_header)
+        # --- DASHBOARD: Dual Lists ---
+        self.lists_container = QWidget()
+        self.lists_layout = QHBoxLayout(self.lists_container)
+        self.lists_layout.setContentsMargins(0, 0, 0, 0)
+        self.lists_layout.setSpacing(20)
         
+        # Left: Documents
+        self.doc_pane = QWidget()
+        self.doc_vbox = QVBoxLayout(self.doc_pane)
+        self.doc_vbox.setContentsMargins(0,0,0,0)
+        self.doc_header = BodyLabel("Knowledge Base Documents:", self)
         self.doc_list = ListWidget(self)
         self.doc_list.itemClicked.connect(self.toggle_selection)
-        self.layout.addWidget(self.doc_list)
+        self.doc_vbox.addWidget(self.doc_header)
+        self.doc_vbox.addWidget(self.doc_list)
+        self.lists_layout.addWidget(self.doc_pane)
+        
+        # Right: Recent Transcripts
+        self.transcript_pane = QWidget()
+        self.transcript_vbox = QVBoxLayout(self.transcript_pane)
+        self.transcript_vbox.setContentsMargins(0,0,0,0)
+        self.transcript_header = BodyLabel("Meeting History:", self)
+        self.transcript_list = ListWidget(self)
+        self.transcript_list.itemClicked.connect(self.view_logged_transcript)
+        self.transcript_vbox.addWidget(self.transcript_header)
+        self.transcript_vbox.addWidget(self.transcript_list)
+        self.lists_layout.addWidget(self.transcript_pane)
+        
+        self.layout.addWidget(self.lists_container)
 
-        # Action Buttons
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(15)
+        # Action Buttons Container
+        self.buttons_container = QWidget()
+        self.button_layout = QHBoxLayout(self.buttons_container)
+        self.button_layout.setContentsMargins(0, 0, 0, 0)
+        self.button_layout.setSpacing(15)
         
         self.upload_btn = PushButton("Upload New Document", self)
         self.upload_btn.clicked.connect(self.upload_document)
@@ -65,16 +107,21 @@ class WelcomeWindow(QMainWindow):
         self.delete_btn.setObjectName("DeleteBtn")
         self.delete_btn.setStyleSheet("QPushButton#DeleteBtn { color: #f44336; }")
         self.delete_btn.clicked.connect(self.delete_selected_document)
-        self.delete_btn.hide() # Only show when something is selected
+        self.delete_btn.hide()
         
         self.start_btn = PrimaryPushButton("Start Session", self)
         self.start_btn.clicked.connect(self.start_session)
         
-        button_layout.addWidget(self.upload_btn)
-        button_layout.addWidget(self.delete_btn)
-        button_layout.addWidget(self.start_btn)
-        self.layout.addLayout(button_layout)
+        self.button_layout.addWidget(self.upload_btn)
+        self.button_layout.addWidget(self.delete_btn)
+        self.button_layout.addWidget(self.start_btn)
+        self.layout.addWidget(self.buttons_container)
         
+        # Stealth Mode Option
+        self.stealth_checkbox = CheckBox("Start in Background (Stealth Mode)", self)
+        self.stealth_checkbox.setToolTip("Hides all UI elements. Use Ctrl+Space for manual refinement.")
+        self.layout.addWidget(self.stealth_checkbox, alignment=Qt.AlignmentFlag.AlignCenter)
+
         # Progress Bar overlay for indexing
         self.progress_bar = ProgressBar(self)
         self.progress_bar.setRange(0, 0)
@@ -98,15 +145,16 @@ class WelcomeWindow(QMainWindow):
         self.summary_text.hide()
         self.layout.addWidget(self.summary_text)
 
-        self.export_btn = PushButton("Export Clean Transcript", self)
-        self.export_btn.clicked.connect(self.export_transcript)
-        self.export_btn.hide()
-        self.layout.addWidget(self.export_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.back_btn = PushButton("Back to Dashboard", self)
+        self.back_btn.clicked.connect(self.return_to_dashboard)
+        self.back_btn.hide()
+        self.layout.addWidget(self.back_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.assistant_window = None
         self.index_thread = None
         
         self.refresh_document_list()
+        self.refresh_transcript_list()
         self.center_on_screen()
 
     def refresh_document_list(self):
@@ -122,52 +170,66 @@ class WelcomeWindow(QMainWindow):
         else:
             self.doc_list.addItem("Database connection error.")
 
+    def refresh_transcript_list(self):
+        self.transcript_list.clear()
+        transcripts_dir = os.path.join(os.getcwd(), "transcripts")
+        if not os.path.exists(transcripts_dir):
+            os.makedirs(transcripts_dir, exist_ok=True)
+        
+        files = [f for f in os.listdir(transcripts_dir) if f.endswith(".txt")]
+        # Sort by date (filename has YYYY-MM-DD_HH-MM-SS)
+        files.sort(reverse=True)
+        
+        if files:
+            for f in files:
+                self.transcript_list.addItem(f"📝 {f}")
+        else:
+            self.transcript_list.addItem("No previous transcripts found.")
+
     def toggle_selection(self, item):
-        # If the item was already selected, deselect it
         if hasattr(self, "_last_selected_item") and self._last_selected_item == item:
             item.setSelected(False)
             self._last_selected_item = None
             self.delete_btn.hide()
         else:
             self._last_selected_item = item
-            if "📄" in item.text(): # Only show delete for real docs
+            if "📄" in item.text():
                 self.delete_btn.show()
             else:
                 self.delete_btn.hide()
+
+    def view_logged_transcript(self, item):
+        if "📝" not in item.text():
+            return
+        
+        filename = item.text().replace("📝 ", "").strip()
+        file_path = os.path.join(os.getcwd(), "transcripts", filename)
+        
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.show_summary_view(content, f"Viewing: {filename}")
+        except Exception as e:
+            InfoBar.error("Error", f"Could not read transcript: {e}", parent=self)
 
     def delete_selected_document(self):
         item = self.doc_list.currentItem()
         if not item or "📄" not in item.text():
             return
-        
         filename = item.text().replace("📄 ", "").strip()
-        
-        # Confirmation skipped for speed as per "agentic focus", 
-        # but the user requested the button specifically.
         try:
             self.store.delete_document(filename)
             self.refresh_document_list()
-            InfoBar.success("Deleted", f"Removed {filename} from knowledge base.", duration=3000, parent=self)
+            InfoBar.success("Deleted", f"Removed {filename}", duration=3000, parent=self)
         except Exception as e:
             InfoBar.error("Error", f"Failed to delete: {e}", duration=4000, parent=self)
 
-    def center_on_screen(self):
-        screen = self.screen().availableGeometry()
-        size = self.geometry()
-        x = (screen.width() - size.width()) // 2
-        y = (screen.height() - size.height()) // 2
-        self.move(x, y)
-
     def upload_document(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Project Document", "", "Documents (*.pdf *.txt)"
-        )
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Document", "", "Documents (*.pdf *.txt)")
         if file_path:
             self.start_btn.setDisabled(True)
             self.upload_btn.setDisabled(True)
             self.progress_bar.show()
-            
-            # Start indexing thread
             self.index_thread = RAGIndexThread(file_path)
             self.index_thread.finished.connect(self.on_index_finished)
             self.index_thread.error.connect(self.on_index_error)
@@ -178,60 +240,76 @@ class WelcomeWindow(QMainWindow):
         self.start_btn.setDisabled(False)
         self.upload_btn.setDisabled(False)
         self.refresh_document_list()
-        InfoBar.success("Success", "Document indexed successfully into Qdrant.", duration=3000, parent=self)
+        InfoBar.success("Success", "Document indexed.", duration=3000, parent=self)
 
     def on_index_error(self, err_msg):
         self.progress_bar.hide()
         self.start_btn.setDisabled(False)
         self.upload_btn.setDisabled(False)
-        InfoBar.error("Error", f"Failed to index: {err_msg[:40]}...", duration=4000, parent=self)
+        InfoBar.error("Error", f"Indexing failed: {err_msg[:40]}", duration=4000, parent=self)
 
     def start_session(self):
         if not self.store:
-            InfoBar.error("Error", "Database not connected. Cannot start RAG.", duration=3000, parent=self)
+            InfoBar.error("Error", "Database not connected.", duration=3000, parent=self)
             return
-            
-        # Get the assistant ready matching the Qdrant backend
-        # Since we decoupled, we just need a SalesAssistant with store
         from core.rag_engine import SalesAssistant
         rag_assistant = SalesAssistant(self.store)
+        is_stealth = self.stealth_checkbox.isChecked()
 
-        self.assistant_window = AssistantWindow(rag_assistant)
+        self.assistant_window = AssistantWindow(rag_assistant, is_stealth=is_stealth)
         self.assistant_window.session_ended.connect(self.on_session_ended)
         self.assistant_window.show()
         
         self.hide()
 
     def on_session_ended(self, clean_transcript):
-        # Update UI to Summary View
-        self.doc_list.hide()
-        self.doc_header.hide()
-        self.upload_btn.hide()
-        self.start_btn.hide()
-        self.progress_bar.hide()
+        self.show_summary_view(clean_transcript, "Meeting Ended Automatically Saved")
+        self.refresh_transcript_list()
+
+    def show_summary_view(self, text, subtitle):
+        self.lists_container.hide()
+        self.buttons_container.hide()
         
-        self.title.setText("Session Ended")
-        self.desc.setText("Here is the clean transcript of your meeting:")
+        self.title.setText("Meeting Transcript")
+        self.desc.setText(subtitle)
         
-        self.summary_text.setPlainText(clean_transcript)
+        self.summary_text.setPlainText(text)
         self.summary_text.show()
-        self.export_btn.show()
+        self.back_btn.show()
         
         self.resize(650, 550)
         self.center_on_screen()
         self.show()
 
-    def export_transcript(self):
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Clean Transcript", "transcript.txt", "Text Files (*.txt)"
-        )
-        if file_path:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(self.summary_text.toPlainText())
-            self.desc.setText(f"Saved to: {file_path}")
-            InfoBar.success("Exported", f"Successfully saved to {os.path.basename(file_path)}", duration=3000, parent=self)
-            self.export_btn.setDisabled(True)
+    def return_to_dashboard(self):
+        self.summary_text.hide()
+        self.back_btn.hide()
+        
+        self.title.setText("AI Sales Meeting Assistant")
+        self.desc.setText("Your unobtrusive AI companion for sales calls.")
+        
+        self.lists_container.show()
+        self.buttons_container.show()
+        
+        self.resize(550, 400)
+        self.center_on_screen()
+        self.refresh_transcript_list()
 
     def closeEvent(self, event):
         from PyQt6.QtWidgets import QApplication
         QApplication.instance().quit()
+
+    def center_on_screen(self):
+        screen = self.screen().availableGeometry()
+        size = self.geometry()
+        x = (screen.width() - size.width()) // 2
+        y = (screen.height() - size.height()) // 2
+        self.move(x, y)
+
+    def on_tray_icon_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            if self.isVisible():
+                self.hide()
+            else:
+                self.show()
+                self.raise_()

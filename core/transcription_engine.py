@@ -73,11 +73,18 @@ class TranscriptionEngine(QThread):
                 # Use the engine_self closure to reach the QThread signal
                 engine_self.new_transcript.emit(speaker_name, transcript, bool(true_final))
 
+            def safe_print(msg):
+                try:
+                    if sys.stdout is not None:
+                        print(msg)
+                except:
+                    pass
+
             def on_error(dg_client, error, **kwargs):
-                print(f"Deepgram WebSocket Error: {error}")
+                safe_print(f"Deepgram WebSocket Error: {error}")
 
             def on_close(dg_client, close, **kwargs):
-                print(f"Deepgram Connection Closed: {close}")
+                safe_print(f"Deepgram Connection Closed: {close}")
 
             # Bind events
             self.dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)

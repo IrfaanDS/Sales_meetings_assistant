@@ -1,4 +1,6 @@
 import threading
+import sys
+import ctypes
 from pynput import keyboard
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QLabel, QVBoxLayout, QScrollArea, QLineEdit, QPushButton, QGraphicsOpacityEffect
 from PyQt6.QtCore import Qt, QPoint, QRect, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty, pyqtSignal
@@ -8,6 +10,16 @@ from core.audio_engine import DualAudioCaptureThread
 from core.transcription_engine import TranscriptionEngine
 from core.meeting_logger import MeetingLogger
 from core.rag_engine import RAGQueryThread, SalesAssistant, IntentGatekeeper, IntentGatekeeperThread
+
+def apply_stealth_affinity(window):
+    if sys.platform == "win32":
+        try:
+            WDA_EXCLUDEFROMCAPTURE = 0x00000011
+            hwnd = int(window.winId())
+            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+        except Exception as e:
+            print(f"Failed to apply stealth display affinity: {e}")
+
 
 class StatusIndicator(QWidget):
     """ A small, pulsing indicator for 'Detecting' or 'Thinking' states """
@@ -61,8 +73,9 @@ class StatusIndicator(QWidget):
 
 class AssistantDisplay(QMainWindow):
     """ The truly unclickable, transparent window displaying the text """
-    def __init__(self):
+    def __init__(self, is_stealth=False):
         super().__init__()
+        self.is_stealth = is_stealth
         
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | 
@@ -74,6 +87,10 @@ class AssistantDisplay(QMainWindow):
         
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
+        
+        # Apply anti-screenshare display affinity if in stealth mode
+        if is_stealth:
+            apply_stealth_affinity(self)
         
         # Dual-column layout
         self.main_layout = QHBoxLayout(self.central_widget)
@@ -150,6 +167,13 @@ class AssistantDisplay(QMainWindow):
         
         self.setStyleSheet(get_stylesheet())
 
+    def fade_in(self):
+        if not self.is_stealth: return
+        self.fade_anim.stop()
+        self.fade_anim.setStartValue(self.windowOpacity())
+        self.fade_anim.setEndValue(0.9)
+        self.fade_anim.start()
+
     def set_status(self, state):
         self.status_indicator.set_state(state)
 
@@ -189,6 +213,7 @@ class AssistantDisplay(QMainWindow):
         self._scroll_to_bottom(self.scroll_area)
 
     def prepare_script_view(self, query=None, is_manual=False):
+        if self.is_stealth: self.fade_in()
         self.last_rag_answer = ""
         prefix = "[Refine] " if is_manual else ""
         if query:
@@ -250,18 +275,16 @@ class AssistantWindow(QMainWindow):
     """ The interactive handle window """
     session_ended = pyqtSignal(str) # Emits the clean transcript
 
-    def __init__(self, rag_assistant: SalesAssistant = None):
+    def __init__(self, rag_assistant: SalesAssistant = None, is_stealth=False):
         super().__init__()
         self.rag_assistant = rag_assistant
+        self.is_stealth = is_stealth
         self.gatekeeper = IntentGatekeeper()
         self.query_thread = None
         self.gatekeeper_thread = None
         
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | 
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
-        )
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.debounce_timer = QTimer()
@@ -269,7 +292,7 @@ class AssistantWindow(QMainWindow):
         self.debounce_timer.timeout.connect(self._trigger_gatekeeper)
         self.pending_text = ""
         
-        self.display_window = AssistantDisplay()
+        self.display_window = AssistantDisplay(is_stealth=is_stealth)
         self.audio_thread = DualAudioCaptureThread()
         self.audio_thread.audio_levels.connect(self.display_window.update_audio_visual)
         self.meeting_logger = MeetingLogger()
@@ -281,8 +304,11 @@ class AssistantWindow(QMainWindow):
         self.transcription_thread.start()
         self.audio_thread.start()
         
-        # Global Hotkey for Manual Refinement
-        self.hotkey_listener = keyboard.GlobalHotKeys({'<ctrl>+<space>': self.on_hotkey_triggered})
+        # Global Hotkeys
+        self.hotkey_listener = keyboard.GlobalHotKeys({
+            '<ctrl>+<space>': self.on_hotkey_triggered,
+            '<ctrl>+<shift>+h': self.on_toggle_visibility_triggered
+        })
         self.hotkey_listener.start()
         
         # UI
@@ -316,6 +342,9 @@ class AssistantWindow(QMainWindow):
         
         self.setStyleSheet(get_stylesheet())
         self.resize(140, 150); self.move(100, 100); self._old_pos = None
+
+        if self.is_stealth:
+            apply_stealth_affinity(self)
 
     def on_hotkey_triggered(self):
         """ Triggered by Ctrl+Space """
@@ -393,6 +422,7 @@ class AssistantWindow(QMainWindow):
         self.meeting_logger.log_rag_interaction("Context Inquiry", self.display_window.last_rag_answer)
 
     def end_session(self):
+        saved_path = self.meeting_logger.save_clean_transcript()
         clean_transcript = self.meeting_logger.get_clean_transcript(include_ai=False)
         self.session_ended.emit(clean_transcript)
         self.close()
@@ -401,6 +431,20 @@ class AssistantWindow(QMainWindow):
         self.close()
         from PyQt6.QtWidgets import QApplication
         QApplication.instance().quit()
+
+    def on_toggle_visibility_triggered(self):
+        """ Triggered by Ctrl+Shift+H """
+        QTimer.singleShot(0, self.toggle_visibility)
+
+    def toggle_visibility(self):
+        # Toggle whole app visibility (Handle + Display)
+        if self.isVisible():
+            self.hide()
+            self.display_window.hide()
+        else:
+            self.show()
+            self.display_window.show()
+            self.raise_()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton: self._old_pos = event.globalPosition().toPoint()
@@ -412,7 +456,10 @@ class AssistantWindow(QMainWindow):
     def update_display_position(self):
         self.display_window.move(self.pos().x() + self.width(), self.pos().y())
     def moveEvent(self, event): super().moveEvent(event); self.update_display_position()
-    def showEvent(self, event): super().showEvent(event); self.display_window.show(); self.update_display_position()
+    def showEvent(self, event): 
+        super().showEvent(event)
+        self.display_window.show()
+        self.update_display_position()
     def closeEvent(self, event):
         self.audio_thread.stop()
         self.transcription_thread.stop()

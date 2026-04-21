@@ -76,7 +76,8 @@ class WelcomeWindow(QMainWindow):
         self.doc_vbox.setContentsMargins(0,0,0,0)
         self.doc_header = BodyLabel("Knowledge Base Documents:", self)
         self.doc_list = ListWidget(self)
-        self.doc_list.itemClicked.connect(self.toggle_selection)
+        self.doc_list.setSelectionMode(ListWidget.SelectionMode.MultiSelection)
+        self.doc_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.doc_vbox.addWidget(self.doc_header)
         self.doc_vbox.addWidget(self.doc_list)
         self.lists_layout.addWidget(self.doc_pane)
@@ -186,17 +187,17 @@ class WelcomeWindow(QMainWindow):
         else:
             self.transcript_list.addItem("No previous transcripts found.")
 
-    def toggle_selection(self, item):
-        if hasattr(self, "_last_selected_item") and self._last_selected_item == item:
-            item.setSelected(False)
-            self._last_selected_item = None
-            self.delete_btn.hide()
+    def on_selection_changed(self):
+        selected_items = self.doc_list.selectedItems()
+        valid_selection = any("📄" in item.text() for item in selected_items)
+        if valid_selection:
+            self.delete_btn.show()
         else:
-            self._last_selected_item = item
-            if "📄" in item.text():
-                self.delete_btn.show()
-            else:
-                self.delete_btn.hide()
+            self.delete_btn.hide()
+
+    def toggle_selection(self, item):
+        # Deprecated by on_selection_changed but keeping for compatibility if called elsewhere
+        pass
 
     def view_logged_transcript(self, item):
         if "📝" not in item.text():
@@ -239,7 +240,21 @@ class WelcomeWindow(QMainWindow):
         self.progress_bar.hide()
         self.start_btn.setDisabled(False)
         self.upload_btn.setDisabled(False)
+        
+        # Determine the name of the file we just uploaded from the thread if possible
+        new_filename = None
+        if hasattr(self, "index_thread") and self.index_thread:
+            new_filename = os.path.basename(self.index_thread.file_path)
+
         self.refresh_document_list()
+        
+        # Auto-select the newly uploaded document
+        if new_filename:
+            for i in range(self.doc_list.count()):
+                item = self.doc_list.item(i)
+                if new_filename in item.text():
+                    item.setSelected(True)
+        
         InfoBar.success("Success", "Document indexed.", duration=3000, parent=self)
 
     def on_index_error(self, err_msg):
@@ -252,8 +267,13 @@ class WelcomeWindow(QMainWindow):
         if not self.store:
             InfoBar.error("Error", "Database not connected.", duration=3000, parent=self)
             return
+
+        # Gather selected documents
+        selected_items = self.doc_list.selectedItems()
+        selected_docs = [item.text().replace("📄 ", "").strip() for item in selected_items if "📄" in item.text()]
+        
         from core.rag_engine import SalesAssistant
-        rag_assistant = SalesAssistant(self.store)
+        rag_assistant = SalesAssistant(self.store, selected_docs=selected_docs)
         is_stealth = self.stealth_checkbox.isChecked()
 
         self.assistant_window = AssistantWindow(rag_assistant, is_stealth=is_stealth)
@@ -296,6 +316,8 @@ class WelcomeWindow(QMainWindow):
         self.refresh_transcript_list()
 
     def closeEvent(self, event):
+        from core.vector_store import close_vector_store
+        close_vector_store()
         from PyQt6.QtWidgets import QApplication
         QApplication.instance().quit()
 

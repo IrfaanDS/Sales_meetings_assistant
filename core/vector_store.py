@@ -89,13 +89,44 @@ class QdrantVectorStore:
             )
         print(f"✅ Upserted {filename} into Qdrant.")
 
-    def search(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
+    def close(self):
+        if hasattr(self, 'client'):
+            try:
+                # QdrantClient doesn't always have an explicit close() 
+                # but we can at least drop the reference.
+                # In newer versions it might have .close()
+                if hasattr(self.client, 'close'):
+                    self.client.close()
+                del self.client
+                print("Qdrant client closed.")
+            except Exception as e:
+                print(f"Error closing Qdrant client: {e}")
+
+    def __del__(self):
+        self.close()
+
+    def search(self, query: str, limit: int = 3, filter_docs: List[str] = None) -> List[Dict[str, Any]]:
         query_vector = self.embed_model.encode([query])[0].tolist()
         
+        query_filter = None
+        if filter_docs:
+            query_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="filename",
+                        match=models.MatchAny(any=filter_docs),
+                    )
+                ]
+            )
+        elif filter_docs is not None:
+            # If an empty list specifically was passed, return no results
+            return []
+
         search_result = self.client.search(
             collection_name=self.collection_name,
             query_vector=query_vector,
             limit=limit,
+            query_filter=query_filter,
             with_payload=True
         )
         
@@ -134,3 +165,9 @@ def get_vector_store():
     if _global_instance is None:
         _global_instance = QdrantVectorStore()
     return _global_instance
+
+def close_vector_store():
+    global _global_instance
+    if _global_instance is not None:
+        _global_instance.close()
+        _global_instance = None

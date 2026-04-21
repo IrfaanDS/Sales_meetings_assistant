@@ -84,10 +84,11 @@ class DocumentProcessor:
         return chunks
 
 class SalesAssistant:
-    def __init__(self, store: QdrantVectorStore, model="llama-3.3-70b-versatile", system_prompt: str = DEFAULT_SYSTEM_PROMPT):
+    def __init__(self, store: QdrantVectorStore, model="llama-3.3-70b-versatile", system_prompt: str = DEFAULT_SYSTEM_PROMPT, selected_docs: List[str] = None):
         self.store = store
         self.model_name = model
         self.system_prompt = system_prompt
+        self.selected_docs = selected_docs
 
     async def stream_ask(self, query: str, context_window: str, emit_func, source_emit_func):
         api_key = os.environ.get("GROQ_API_KEY")
@@ -99,8 +100,8 @@ class SalesAssistant:
             model_kwargs={"stream": True}
         )
         
-        # Retrieve from Qdrant
-        results = await asyncio.to_thread(self.store.search, query, 3)
+        # Retrieve from Qdrant with filtering
+        results = await asyncio.to_thread(self.store.search, query, 3, self.selected_docs)
         
         ctx_texts = []
         sources = []

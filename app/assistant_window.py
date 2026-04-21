@@ -466,4 +466,6 @@ class AssistantWindow(QMainWindow):
         self.hotkey_listener.stop()
         self.meeting_logger.flush()
         self.display_window.close()
+        from core.vector_store import close_vector_store
+        close_vector_store()
         super().closeEvent(event)

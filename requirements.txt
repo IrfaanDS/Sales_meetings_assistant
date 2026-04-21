@@ -15,3 +15,4 @@ langchain-groq==1.1.2
 nest-asyncio==1.6.0
 PyQt6-Fluent-Widgets==1.6.3
 qdrant-client==1.10.0
+google-generativeai

@@ -84,7 +84,7 @@ class TranscriptionEngine(QThread):
                 self.dg_connection.on(LiveTranscriptionEvents.Close, on_close)
 
                 options = LiveOptions(
-                    model="nova-2-meeting",
+                    model="nova-3",
                     language="en-US",
                     multichannel=True,
                     channels=2,

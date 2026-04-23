@@ -1,28 +1,53 @@
 import os
+import sys
 import uuid
+import logging
+from pathlib import Path
 from typing import List, Dict, Any
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from sentence_transformers import SentenceTransformer
 
+
+def _get_model_path():
+    """Return the SentenceTransformer model path, accounting for PyInstaller frozen bundles."""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+        return os.path.join(base, 'sentence_transformers_cache', 'all-MiniLM-L6-v2')
+    return 'all-MiniLM-L6-v2'
+
+
+def _get_db_path():
+    """Return a persistent Qdrant DB path inside AppData, never relative to cwd."""
+    app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+    db_path = app_data / "qdrant_db"
+    db_path.mkdir(parents=True, exist_ok=True)
+    return str(db_path)
+
+
 class QdrantVectorStore:
-    def __init__(self, collection_name: str = "meeting_docs", db_path: str = "./qdrant_db"):
+    def __init__(self, collection_name: str = "meeting_docs", db_path: str = None):
         self.collection_name = collection_name
-        self.db_path = db_path
+        self.db_path = db_path or _get_db_path()
         
         # Ensure directory exists for local qdrant
         os.makedirs(self.db_path, exist_ok=True)
         
-        self.client = QdrantClient(path=self.db_path)
-        self.embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+        try:
+            self.client = QdrantClient(path=self.db_path)
+        except Exception as e:
+            logging.critical(f"Failed to open Qdrant DB at {self.db_path}: {e}", exc_info=True)
+            raise  # Let it propagate so RAGIndexThread.error signal fires
+
+        self.embed_model = SentenceTransformer(_get_model_path())
         self._ensure_collection()
 
     def _ensure_collection(self):
         try:
             self.client.get_collection(self.collection_name)
-            print(f"Collection {self.collection_name} exists.")
+            logging.info(f"Collection {self.collection_name} exists.")
         except Exception:
-            print(f"Creating new collection {self.collection_name}...")
+            logging.info(f"Creating new collection {self.collection_name}...")
             vector_size = self.embed_model.get_sentence_embedding_dimension()
             self.client.create_collection(
                 collection_name=self.collection_name,
@@ -48,7 +73,7 @@ class QdrantVectorStore:
         try:
             records, next_page = self.client.scroll(
                 collection_name=self.collection_name,
-                limit=10000,
+                limit=1000,
                 with_payload=True,
                 with_vectors=False
             )
@@ -56,14 +81,14 @@ class QdrantVectorStore:
                 if record.payload and "filename" in record.payload:
                     filenames.add(record.payload["filename"])
         except Exception as e:
-            print(f"Error listing documents: {e}")
+            logging.error(f"Error listing documents: {e}")
         return list(filenames)
 
     def upsert_chunks(self, chunks: List[str], filename: str):
         if not chunks:
             return
 
-        print(f"Embedding {len(chunks)} chunks for {filename}...")
+        logging.info(f"Embedding {len(chunks)} chunks for {filename}...")
         embeddings = self.embed_model.encode(chunks, show_progress_bar=False)
         
         points = []
@@ -87,7 +112,7 @@ class QdrantVectorStore:
                 collection_name=self.collection_name,
                 points=points[i:i+batch_size]
             )
-        print(f"✅ Upserted {filename} into Qdrant.")
+        logging.info(f"Upserted {filename} into Qdrant.")
 
     def close(self):
         if hasattr(self, 'client'):
@@ -98,9 +123,9 @@ class QdrantVectorStore:
                 if hasattr(self.client, 'close'):
                     self.client.close()
                 del self.client
-                print("Qdrant client closed.")
+                logging.info("Qdrant client closed.")
             except Exception as e:
-                print(f"Error closing Qdrant client: {e}")
+                logging.error(f"Error closing Qdrant client: {e}")
 
     def __del__(self):
         self.close()
@@ -142,7 +167,7 @@ class QdrantVectorStore:
 
     def delete_document(self, filename: str):
         """Deletes all chunks associated with a specific filename."""
-        print(f"Deleting document: {filename} from Qdrant...")
+        logging.info(f"Deleting document: {filename} from Qdrant...")
         self.client.delete(
             collection_name=self.collection_name,
             points_selector=models.FilterSelector(
@@ -156,7 +181,7 @@ class QdrantVectorStore:
                 )
             ),
         )
-        print(f"✅ Deleted {filename}.")
+        logging.info(f"Deleted {filename}.")
 
 _global_instance = None
 

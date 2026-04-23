@@ -1,7 +1,7 @@
 import os
 import time
 import asyncio
-import nest_asyncio
+import logging
 import google.generativeai as genai
 from typing import List, Dict, Optional
 from pypdf import PdfReader
@@ -10,8 +10,6 @@ from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from dotenv import load_dotenv
 
 from core.vector_store import QdrantVectorStore, get_vector_store
-
-nest_asyncio.apply()
 load_dotenv()
 
 # Configure LLM default system prompt
@@ -120,11 +118,21 @@ class SalesAssistant:
             source_emit_func(f"<br><span style='color:#808080; font-size:11px;'><br><b>Sources:</b> {', '.join(sources)}</span><br><br>")
         
         try:
-            async for chunk in llm.astream(prompt): 
-                emit_func(chunk.content)
+            await asyncio.wait_for(
+                self._do_stream(llm, prompt, emit_func),
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            emit_func("\n[Response timed out after 30s]\n")
+            logging.error("stream_ask timed out after 30 seconds.")
         except Exception as e:
             emit_func(f"\n[Model Error: {e}]\n")
-            print(f"❌ Model error: {e}")
+            logging.error(f"Model error: {e}", exc_info=True)
+
+    async def _do_stream(self, llm, prompt, emit_func):
+        """Helper for stream_ask so asyncio.wait_for can wrap it."""
+        async for chunk in llm.astream(prompt):
+            emit_func(chunk.content)
 
 
 class IntentGatekeeper:
@@ -132,7 +140,7 @@ class IntentGatekeeper:
         self.api_key = os.getenv("GOOGLE_API_KEY")
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-2.5-flash')
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
 
     async def classify_intent(self, text: str) -> bool:
         """
@@ -166,7 +174,7 @@ class IntentGatekeeper:
             result = response.text.strip().upper()
             return "TRUE" in result
         except Exception as e:
-            print(f"Gatekeeper Error: {e}")
+            logging.error(f"Gatekeeper Error: {e}")
             return False
 
 
@@ -214,7 +222,7 @@ class RAGIndexThread(QThread):
             assistant = SalesAssistant(store)
             self.finished.emit(assistant)
         except Exception as e:
-            print(f"Index error: {e}")
+            logging.error(f"Index error: {e}", exc_info=True)
             self.error.emit(str(e))
 
 
@@ -267,7 +275,7 @@ class RAGQueryThread(QThread):
         except CancelledError:
             pass
         except Exception as e:
-            print(f"RAGQueryThread error: {e}")
+            logging.error(f"RAGQueryThread error: {e}", exc_info=True)
         finally:
             loop.close()
             if not self._is_cancelled:

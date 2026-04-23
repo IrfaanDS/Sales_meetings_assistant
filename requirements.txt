@@ -16,3 +16,4 @@ nest-asyncio==1.6.0
 PyQt6-Fluent-Widgets==1.6.3
 qdrant-client==1.10.0
 google-generativeai
+fpdf2==2.8.7

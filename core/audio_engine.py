@@ -1,3 +1,4 @@
+import logging
 import pyaudiowpatch as pyaudio
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -26,7 +27,7 @@ class DualAudioCaptureThread(QThread):
         try:
             wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
         except OSError:
-            print("WASAPI not found. Ensure you are on Windows.")
+            logging.error("WASAPI not found. Ensure you are on Windows.")
             return
 
         wasapi_index = wasapi_info["index"]
@@ -40,7 +41,7 @@ class DualAudioCaptureThread(QThread):
                     break
 
         if not loopback_device:
-            print("WASAPI Loopback not found. Ensure speakers are enabled.")
+            logging.error("WASAPI Loopback not found. Ensure speakers are enabled.")
             p.terminate()
             return
 
@@ -48,7 +49,7 @@ class DualAudioCaptureThread(QThread):
         try:
             mic_device = p.get_default_input_device_info()
         except IOError:
-            print("No default microphone found.")
+            logging.error("No default microphone found.")
             p.terminate()
             return
 
@@ -60,7 +61,12 @@ class DualAudioCaptureThread(QThread):
         loop_channels = int(loopback_device.get("maxInputChannels", 2))
         if loop_channels == 0:
             loop_channels = int(loopback_device.get("maxOutputChannels", 2))
-            
+
+        if loop_channels == 0:
+            logging.error("Loopback device reports 0 channels. Cannot open stream.")
+            p.terminate()
+            return
+
         mic_channels = int(mic_device.get("maxInputChannels", 1))
 
         # Open System Audio Stream
@@ -74,7 +80,7 @@ class DualAudioCaptureThread(QThread):
                 frames_per_buffer=CHUNK
             )
         except OSError as e:
-            print(f"Failed to open loopback stream: {e}")
+            logging.error(f"Failed to open loopback stream: {e}")
             p.terminate()
             return
 
@@ -89,12 +95,12 @@ class DualAudioCaptureThread(QThread):
                 frames_per_buffer=CHUNK
             )
         except OSError as e:
-            print(f"Failed to open mic stream: {e}")
+            logging.error(f"Failed to open mic stream: {e}")
             loop_stream.close()
             p.terminate()
             return
 
-        print("Capturing both Mic (Sales Rep) and System Audio (Client)...")
+        logging.info("Capturing both Mic (Sales Rep) and System Audio (Client)...")
         MAX_RMS_SCALE = 10000
 
         while self._running:
@@ -144,9 +150,12 @@ class DualAudioCaptureThread(QThread):
 
                 self.audio_levels.emit(rep_rms, client_rms)
 
+            except OSError as e:
+                logging.error(f"Audio stream OSError (stream likely closed): {e}")
+                break
             except Exception as e:
-                # print(f"Audio read error: {e}")
-                pass
+                logging.error(f"Unexpected audio loop error: {e}", exc_info=True)
+                break
 
         if loop_stream.is_active():
             loop_stream.stop_stream()

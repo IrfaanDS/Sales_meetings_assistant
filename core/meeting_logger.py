@@ -1,12 +1,21 @@
 import os
 import json
+import logging
+from pathlib import Path
 from datetime import datetime
+
+def _get_app_data_dir():
+    """Return the persistent AppData directory for the application."""
+    app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+    app_data.mkdir(parents=True, exist_ok=True)
+    return app_data
 
 class MeetingLogger:
     def __init__(self):
-        # Ensure the logs directory exists
-        self.logs_dir = os.path.join(os.getcwd(), "logs")
-        self.transcripts_dir = os.path.join(os.getcwd(), "transcripts")
+        # Use AppData directory — never os.getcwd()
+        app_data = _get_app_data_dir()
+        self.logs_dir = str(app_data / "logs")
+        self.transcripts_dir = str(app_data / "transcripts")
         os.makedirs(self.logs_dir, exist_ok=True)
         os.makedirs(self.transcripts_dir, exist_ok=True)
         
@@ -20,7 +29,7 @@ class MeetingLogger:
         self.current_timestamp = None
         self.history = [] # In-memory history for RAG context
         
-        print(f"Logging conversation to {self.log_file}")
+        logging.info(f"Logging conversation to {self.log_file}")
 
     def log_utterance(self, speaker: str, text: str):
         """
@@ -115,12 +124,25 @@ class MeetingLogger:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")
         except Exception as e:
-            print(f"File log error: {e}")
+            logging.error(f"File log error: {e}")
 
         # Reset buffer
         self.aggregated_text = []
         self.current_speaker = None
         self.current_timestamp = None
+
+    def flush_if_stale(self, max_age_seconds: int = 30):
+        """Safety flush: write the buffer if it's older than max_age_seconds to prevent data loss on crash."""
+        if not self.current_timestamp or not self.aggregated_text:
+            return
+        try:
+            ts = datetime.fromisoformat(self.current_timestamp)
+            age = (datetime.now() - ts).total_seconds()
+            if age >= max_age_seconds:
+                logging.info("Safety flush triggered (stale buffer).")
+                self.flush()
+        except Exception as e:
+            logging.error(f"flush_if_stale error: {e}")
 
     def log_rag_interaction(self, question: str, answer: str):
         """Logs an AI Q&A interaction."""
@@ -141,7 +163,7 @@ class MeetingLogger:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")
         except Exception as e:
-            print(f"File log error (RAG): {e}")
+            logging.error(f"File log error (RAG): {e}")
 
     def save_clean_transcript(self) -> str:
         """
@@ -163,6 +185,5 @@ class MeetingLogger:
                 f.write(transcript)
             return file_path
         except Exception as e:
-            print(f"Error saving clean transcript: {e}")
+            logging.error(f"Error saving clean transcript: {e}")
             return ""
-

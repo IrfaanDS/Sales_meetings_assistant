@@ -12,6 +12,8 @@ transcript.txt
 # Local Vector Database
 qdrant_db/
 transcripts/
+Meeting_Summary.pdf
+scratch/
 
 # Distribution / packaging
 .Python

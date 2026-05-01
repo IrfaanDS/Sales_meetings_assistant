@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import './index.css'
-import Dashboard from './views/Dashboard.tsx'
-import Summary from './views/Summary.tsx'
-import Transcript from './views/Transcript.tsx'
+import Dashboard from './views/Dashboard'
+import Summary from './views/Summary'
+import Transcript from './views/Transcript'
 
 type View = 'dashboard' | 'summary' | 'transcript'
 

@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Button } from '@/components/ui/button.tsx'
-import { ScrollArea } from '@/components/ui/scroll-area.tsx'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { FileText, ArrowLeft, Sparkles, Search, Mic, User } from 'lucide-react'
 
 interface TranscriptProps {

@@ -153,7 +153,13 @@ async def websocket_live(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 # SPA Fallback — Serve React build for all non-API routes
 # ---------------------------------------------------------------------------
-static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "dist")
+import sys
+def get_resource_path(relative_path):
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), relative_path)
+
+static_dir = get_resource_path(os.path.join("web", "dist"))
 
 # Mount static assets FIRST (js, css, etc.)
 if os.path.exists(os.path.join(static_dir, "assets")):

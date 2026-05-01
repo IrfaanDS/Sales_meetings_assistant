@@ -52,8 +52,13 @@ import threading
 import uvicorn
 
 def run_fastapi():
-    from app.api import app as fastapi_app
-    uvicorn.run(fastapi_app, host="127.0.0.1", port=8765, log_level="warning")
+    try:
+        from app.api import app as fastapi_app
+        log_msg("Starting FastAPI server on port 8765...")
+        uvicorn.run(fastapi_app, host="127.0.0.1", port=8765, log_level="warning")
+    except Exception as e:
+        log_msg(f"FASTAPI SERVER CRASHED: {e}")
+        logging.error(traceback.format_exc())
 
 def main():
     try:

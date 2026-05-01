@@ -6,6 +6,15 @@ import platform
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
+# ---------------------------------------------------------------------------
+# Guard against None stdout/stderr (PyInstaller windowed mode sets them to None)
+# Uvicorn's logging formatter calls sys.stdout.isatty() which crashes otherwise
+# ---------------------------------------------------------------------------
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 log_dir = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
 log_dir.mkdir(parents=True, exist_ok=True)
 log_file = str(log_dir / "MASTER_DEBUG_LOG.txt")
@@ -55,7 +64,10 @@ def run_fastapi():
     try:
         from app.api import app as fastapi_app
         log_msg("Starting FastAPI server on port 8765...")
-        uvicorn.run(fastapi_app, host="127.0.0.1", port=8765, log_level="warning")
+        # log_config=None prevents uvicorn from configuring its own formatters
+        # which crash in windowed mode (no real console). Our RotatingFileHandler
+        # already captures all logging output.
+        uvicorn.run(fastapi_app, host="127.0.0.1", port=8765, log_level="warning", log_config=None)
     except Exception as e:
         log_msg(f"FASTAPI SERVER CRASHED: {e}")
         logging.error(traceback.format_exc())

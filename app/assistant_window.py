@@ -197,7 +197,7 @@ class AssistantDisplay(QMainWindow):
         
         self.script_label = QLabel("Waiting for client questions...")
         self.script_label.setWordWrap(True)
-        self.script_label.setObjectName("TranscriptionLabel")
+        self.script_label.setObjectName("ScriptLabel")
         self.script_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         
         self.script_scroll.setWidget(self.script_label)
@@ -236,6 +236,8 @@ class AssistantDisplay(QMainWindow):
         
         self.blocks = []
         self.last_rag_answer = ""
+        self.script_display_html = ""
+        self.transcript_display_html = ""
         
         self.setStyleSheet(get_stylesheet())
 
@@ -250,19 +252,22 @@ class AssistantDisplay(QMainWindow):
         self.status_indicator.set_state(state)
 
     def update_audio_visual(self, rep_rms, client_rms):
+        # Throttle visual updates if needed, but 23ms is usually okay
+        # Reducing computation for bars
         MAX_RMS_SCALE = 5000
         rep_lvl = min(max(int((rep_rms / MAX_RMS_SCALE) * 20), 4), 20)
         cli_lvl = min(max(int((client_rms / MAX_RMS_SCALE) * 20), 4), 20)
         
         # Update bar heights
         for i, b in enumerate(self.rep_bar_widgets):
-            # Add some jitter/variation to look like a wave
             h = max(4, rep_lvl - (i * 2)) if i < 3 else max(4, rep_lvl - ((4-i) * 2))
-            b.setFixedHeight(h)
+            if b.height() != h: # Only update if changed
+                b.setFixedHeight(h)
             
         for i, b in enumerate(self.cli_bar_widgets):
             h = max(4, cli_lvl - (i * 2)) if i < 3 else max(4, cli_lvl - ((4-i) * 2))
-            b.setFixedHeight(h)
+            if b.height() != h:
+                b.setFixedHeight(h)
 
     def update_transcript_visual(self, speaker, text, is_final):
         active_block = next((b for b in reversed(self.blocks) if b["speaker"] == speaker and b.get("is_active", False)), None)
@@ -281,13 +286,11 @@ class AssistantDisplay(QMainWindow):
             
         if len(self.blocks) > 5: self.blocks = self.blocks[-5:]
             
-        display_lines = []
+        display_html = []
         for b in self.blocks:
             combined = (" ".join(b["final"]) + " " + b["interim"]).strip()
             if combined:
                 speaker_type = "YOU" if b["speaker"] == "You" else "CLIENT"
-                tag_class = "SpeakerYou" if speaker_type == "YOU" else "SpeakerClient"
-                
                 tag_color = "#93c5fd" if speaker_type == "YOU" else "#10b981"
                 tag_bg = "rgba(147, 197, 253, 0.1)" if speaker_type == "YOU" else "rgba(16, 185, 129, 0.1)"
                 tag_icon = "𝄗"
@@ -300,33 +303,41 @@ class AssistantDisplay(QMainWindow):
                     <p style="color: #e2e8f0; font-family: 'Inter'; font-size: 13px; line-height: 1.5; margin: 0;">{combined}</p>
                 </div>
                 """
-                display_lines.append(line)
-                
-        self.transcript_label.setText("".join(display_lines))
-        self._scroll_to_bottom(self.scroll_area)
+                display_html.append(line)
+        
+        new_html = "".join(display_html)
+        if new_html != self.transcript_display_html:
+            self.transcript_display_html = new_html
+            self.transcript_label.setText(new_html)
+            self._scroll_to_bottom(self.scroll_area)
 
     def prepare_script_view(self, query=None, is_manual=False):
         if self.is_stealth: self.fade_in()
         self.last_rag_answer = ""
-        prefix = "[Refine] " if is_manual else ""
+        prefix = "<span style='color: #fbbf24; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(251, 191, 36, 0.1);'>MANUAL</span> " if is_manual else ""
+        
         if query:
-            header = f'<span style="color: #4db8ff"><b>{prefix}Q:</b> {query}</span><br><span style="color: #FFA500"><b>A:</b> </span>'
+            self.script_display_html = f'<div style="margin-bottom: 12px; font-size: 13px;"><span style="color: #94a3b8;">{prefix}Question: </span><span style="color: #e2e8f0;">{query}</span></div><div style="color: #ffffff; font-size: 15px; font-weight: 500; line-height: 1.6;">'
         else:
-            header = f'<span style="color: #FFA500"><b>Auto-Script:</b> </span>'
-        self.script_label.setText(header)
+            self.script_display_html = f'<div style="margin-bottom: 8px;"><span style="color: #10b981; font-size: 11px; font-weight: 700; letter-spacing: 0.05em;">AUTO-DETECTED</span></div><div style="color: #ffffff; font-size: 15px; font-weight: 500; line-height: 1.6;">'
+            
+        self.script_label.setText(self.script_display_html)
         # Dim text while generating
         self.script_opacity_effect.setOpacity(0.4)
         self._scroll_to_bottom(self.script_scroll)
 
     def append_script_chunk(self, chunk):
         self.last_rag_answer += chunk
-        current_text = self.script_label.text()
         html_chunk = chunk.replace('\\n', '<br>').replace('\n', '<br>')
-        self.script_label.setText(current_text + html_chunk)
+        self.script_display_html += html_chunk
+        self.script_label.setText(self.script_display_html + '</div>')
         self._scroll_to_bottom(self.script_scroll)
 
     def finalize_script_chunk(self):
-        # Fade in to 100% when complete
+        # Close any open div tags and fade in
+        if not self.script_display_html.endswith('</div>'):
+            self.script_display_html += '</div>'
+        self.script_label.setText(self.script_display_html)
         self.script_anim.start()
 
     def _scroll_to_bottom(self, scroll_area):
@@ -711,12 +722,18 @@ class AssistantWindow(QMainWindow):
         if "error" in summary_data:
             QMessageBox.warning(self, "Summary Error", summary_data["error"])
         else:
-            # Show summary window
-            self.summary_window = SummaryWindow(summary_data, self.summary_engine)
-            self.summary_window.show()
-            # We don't close the main app yet, let the user see the summary
-            # When summary window is closed, we can emit session_ended
-            self.summary_window.closed.connect(self._finalize_session)
+            # Save summary to session directory
+            try:
+                import json
+                session_dir = self.meeting_logger.get_session_dir()
+                summary_file = os.path.join(session_dir, "summary.json")
+                with open(summary_file, "w", encoding="utf-8") as f:
+                    json.dump(summary_data, f, indent=2)
+            except Exception as e:
+                logging.error(f"Failed to save summary.json: {e}")
+
+            # Return to Dashboard
+            self._finalize_session()
 
     def on_summary_error(self, error_msg):
         if hasattr(self, 'processing_dialog'):

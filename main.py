@@ -10,7 +10,7 @@ log_dir = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
 log_dir.mkdir(parents=True, exist_ok=True)
 log_file = str(log_dir / "MASTER_DEBUG_LOG.txt")
 
-handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=3)
+handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=3, encoding='utf-8')
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logging.getLogger().addHandler(handler)
 logging.getLogger().setLevel(logging.DEBUG)
@@ -48,8 +48,17 @@ except Exception as e:
     input("Press Enter to exit...")
     sys.exit(1)
 
+import threading
+import uvicorn
+
+def run_fastapi():
+    from app.api import app as fastapi_app
+    uvicorn.run(fastapi_app, host="127.0.0.1", port=8765, log_level="warning")
+
 def main():
     try:
+        threading.Thread(target=run_fastapi, daemon=True).start()
+        
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(True)
         window = WelcomeWindow()

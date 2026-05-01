@@ -164,6 +164,13 @@ def get_stylesheet():
         line-height: 1.5;
     }
 
+    /* Script Overlay Area */
+    QLabel#ScriptLabel {
+        color: #ffffff;
+        font-size: 15px;
+        font-weight: 500;
+    }
+
     /* Checkbox Modernized */
     QCheckBox {
         color: #94a3b8;

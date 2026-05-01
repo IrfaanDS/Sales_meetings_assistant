@@ -84,7 +84,7 @@ class QdrantVectorStore:
             logging.error(f"Error listing documents: {e}")
         return list(filenames)
 
-    def upsert_chunks(self, chunks: List[str], filename: str):
+    def upsert_chunks(self, chunks: List[str], filename: str, metadata: Dict[str, Any] = None):
         if not chunks:
             return
 
@@ -93,15 +93,19 @@ class QdrantVectorStore:
         
         points = []
         for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            payload = {
+                "text": chunk,
+                "filename": filename,
+                "chunk_idx": i
+            }
+            if metadata:
+                payload.update(metadata)
+                
             points.append(
                 models.PointStruct(
                     id=str(uuid.uuid4()),
                     vector=emb.tolist(),
-                    payload={
-                        "text": chunk,
-                        "filename": filename,
-                        "chunk_idx": i
-                    }
+                    payload=payload
                 )
             )
 
@@ -130,22 +134,32 @@ class QdrantVectorStore:
     def __del__(self):
         self.close()
 
-    def search(self, query: str, limit: int = 3, filter_docs: List[str] = None) -> List[Dict[str, Any]]:
+    def search(self, query: str, limit: int = 3, filter_docs: List[str] = None, filter_metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         query_vector = self.embed_model.encode([query])[0].tolist()
         
-        query_filter = None
+        must_conditions = []
+        
         if filter_docs:
-            query_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="filename",
-                        match=models.MatchAny(any=filter_docs),
-                    )
-                ]
+            must_conditions.append(
+                models.FieldCondition(
+                    key="filename",
+                    match=models.MatchAny(any=filter_docs),
+                )
             )
         elif filter_docs is not None:
             # If an empty list specifically was passed, return no results
             return []
+
+        if filter_metadata:
+            for key, value in filter_metadata.items():
+                must_conditions.append(
+                    models.FieldCondition(
+                        key=key,
+                        match=models.MatchValue(value=value)
+                    )
+                )
+
+        query_filter = models.Filter(must=must_conditions) if must_conditions else None
 
         search_result = self.client.search(
             collection_name=self.collection_name,
@@ -161,7 +175,8 @@ class QdrantVectorStore:
                 results.append({
                     "text": scored_point.payload.get("text", ""),
                     "filename": scored_point.payload.get("filename", "Unknown"),
-                    "score": scored_point.score
+                    "score": scored_point.score,
+                    "metadata": scored_point.payload
                 })
         return results
 

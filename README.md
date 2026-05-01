@@ -1,83 +1,75 @@
-# AI Sales Meeting Assistant
+# ARIA: AI Sales Meeting Assistant
 
-A professional, real-time AI copilot designed to help sales teams transcribe, analyze, and summarize their meetings. Built with PyQt6 and powered by state-of-the-art LLMs.
+ARIA is a professional, real-time AI Sales Copilot designed to empower sales teams by providing live narration-ready scripts, automated intent detection, and comprehensive post-meeting intelligence. Built with a high-performance PyQt6/React hybrid architecture.
 
-## 🚀 Features
+## 🚀 Key Features
 
-- **Real-time Transcription**: High-accuracy live audio transcription using Deepgram.
-- **AI Insights & Detection**: Detects customer intent, objections, and key moments during the call using Groq and Google Gemini.
-- **Post-Meeting Summaries**: Generates comprehensive meeting summaries, including sentiment analysis and next steps.
-- **PDF Export**: Export your meeting summaries to professionally formatted PDF documents.
-- **Meeting Dashboard**: View and manage historical meeting transcripts and summaries.
-- **Vector Search**: Local vector database (Qdrant) for indexing meeting data, enabling intelligent search and RAG capabilities.
-- **Modern UI**: Sleek, dark-themed dashboard built with PyQt6.
+- **Live AI Scripting**: Generates word-for-word speaking scripts for the host based on real-time client dialogue.
+- **Intent Gatekeeper**: Automatically detects high-intent technical questions or objections to trigger intelligent RAG responses.
+- **Professional Dashboard**: A modern React-powered interface for managing documents, session history, and summaries.
+- **Local RAG Engine**: Private, secure vector search using Qdrant for indexing product documentation and host profiles.
+- **Automated Summaries**: Generates structured meeting intelligence including sentiment analysis and actionable next steps.
+- **Enterprise UI Overlay**: A beautiful, glassy HUD that stays on top of your meeting (Zoom/Teams/etc.) with adjustable opacity and stealth modes.
+- **Auto-Update System**: Built-in update manager that checks for new releases directly from GitHub.
 
 ## 🛠️ Tech Stack
 
+- **Frontend**: React 18, Tailwind CSS, Vite (embedded via `QWebEngineView`)
+- **Backend**: Python 3.11, FastAPI, Uvicorn
 - **GUI Framework**: PyQt6
-- **Speech-to-Text**: Deepgram
-- **Language Models**: Google Gemini (1.5 Flash / 2.5 Flash), Groq
-- **Vector Database**: Qdrant
-- **Styling**: Custom CSS (Modern Dark Mode)
+- **Speech-to-Text**: Deepgram (High-fidelity streaming)
+- **AI/LLM**: Google Gemini 1.5/2.0 Flash, Groq (Llama 3.1)
+- **Vector DB**: Qdrant (Local persistent storage)
 
-## 📋 Prerequisites
+## 🔧 Installation & Setup
 
-- Python 3.10+
-- [Deepgram API Key](https://deepgram.com/)
-- [Google AI (Gemini) API Key](https://ai.google.dev/)
-- [Groq API Key](https://groq.com/)
+### 1. Prerequisites
+- Python 3.11+
+- Node.js 20+
+- API Keys: [Deepgram](https://deepgram.com/), [Google AI](https://ai.google.dev/), [Groq](https://groq.com/)
 
-## 🔧 Installation
-
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd Sales_meetings_assistant_pyinstaller
-   ```
-
-2. **Create a virtual environment**:
-   ```bash
-   python -m venv venv
-   source venv/Scripts/activate  # Windows
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment variables**:
-   Create a `.env` file in the root directory and add your API keys:
-   ```env
-   DEEPGRAM_API_KEY=your_deepgram_key
-   GOOGLE_API_KEY=your_gemini_key
-   GROQ_API_KEY=your_groq_key
-   ```
-
-## 🏃 Running the Application
-
-To start the assistant:
-```bash
-python main.py
+### 2. Environment Configuration
+Create a `.env` file in the root directory:
+```env
+DEEPGRAM_API_KEY=your_key
+GOOGLE_API_KEY=your_key
+GROQ_API_KEY=your_key
 ```
 
-## 📦 Packaging (PyInstaller)
-
-To build a standalone executable:
+### 3. Backend Setup
 ```bash
-.\venv\Scripts\python.exe -m PyInstaller build.spec
+python -m venv venv
+source venv/Scripts/activate  # Windows: .\venv\Scripts\activate
+pip install -r requirements.txt
 ```
-The executable will be located in the `dist/` directory.
+
+### 4. Frontend Setup
+```bash
+cd web
+npm install
+npm run build
+cd ..
+```
+
+## 📦 Building & Distribution
+
+### Local Build (Windows)
+To create a standalone executable for distribution:
+1. **Download model cache**: `python scripts/download_model.py`
+2. **Build with PyInstaller**: `pyinstaller build.spec`
+
+### CI/CD Pipeline
+The project includes a GitHub Actions workflow (`.github/workflows/release.yml`) that automates the build process.
+- **Trigger**: Push a tag starting with `v` (e.g., `git tag v1.0.0` & `git push origin v1.0.0`).
+- **Output**: A compiled `.zip` containing the portable application is automatically uploaded to a new GitHub Release.
 
 ## 📁 Project Structure
 
-- `app/`: GUI windows, dialogs, and styling.
-- `core/`: AI engines (Summary, RAG, Transcription).
-- `qdrant_db/`: Local vector database storage.
-- `transcripts/`: Saved meeting transcript files.
-- `main.py`: Application entry point.
-- `build.spec`: PyInstaller configuration.
+- `app/`: PyQt6 GUI windows and visual components.
+- `web/`: React dashboard source code (Vite).
+- `core/`: Core engines for RAG, Summarization, and Audio processing.
+- `scripts/`: Utility scripts for build automation and model management.
+- `build.spec`: Optimized PyInstaller configuration for Windows distribution.
 
 ## 📄 License
-
 [MIT License](LICENSE)

@@ -14,14 +14,15 @@ class MeetingLogger:
     def __init__(self):
         # Use AppData directory — never os.getcwd()
         app_data = _get_app_data_dir()
-        self.logs_dir = str(app_data / "logs")
-        self.transcripts_dir = str(app_data / "transcripts")
-        os.makedirs(self.logs_dir, exist_ok=True)
-        os.makedirs(self.transcripts_dir, exist_ok=True)
+        self.sessions_dir = str(app_data / "sessions")
+        os.makedirs(self.sessions_dir, exist_ok=True)
         
-        # Create a unique file for this session based on start time
+        # Create a unique directory for this session based on start time
         self.timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.log_file = os.path.join(self.logs_dir, f"meeting_{self.timestamp}.jsonl")
+        self.session_dir = os.path.join(self.sessions_dir, f"Session_{self.timestamp}")
+        os.makedirs(self.session_dir, exist_ok=True)
+        
+        self.log_file = os.path.join(self.session_dir, "meeting_events.jsonl")
         
         # Aggregation state
         self.current_speaker = None
@@ -175,15 +176,15 @@ class MeetingLogger:
         if not transcript:
             return ""
             
-        filename = f"transcript_{self.timestamp}.txt"
-        file_path = os.path.join(self.transcripts_dir, filename)
+        file_path = os.path.join(self.session_dir, "transcript.txt")
         
         try:
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"Meeting Transcript - {self.timestamp}\n")
-                f.write("="*40 + "\n\n")
                 f.write(transcript)
             return file_path
         except Exception as e:
             logging.error(f"Error saving clean transcript: {e}")
             return ""
+
+    def get_session_dir(self) -> str:
+        return self.session_dir

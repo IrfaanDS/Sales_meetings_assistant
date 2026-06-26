@@ -27,8 +27,8 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
-        pip install -r requirements.txt
-        pip install pyinstaller
+        python -m pip install -r requirements.txt
+        python -m pip install pyinstaller
 
     - name: Download AI Model
       run: |
@@ -42,7 +42,7 @@ jobs:
 
     - name: Build Executable with PyInstaller
       run: |
-        pyinstaller build.spec
+        python -m PyInstaller build.spec
 
     - name: Compress Release
       run: |

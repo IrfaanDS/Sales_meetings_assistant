@@ -2,7 +2,7 @@ import os
 import sys
 import time
 import logging
-from dotenv import load_dotenv
+from core.utils import load_env_file
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from deepgram import (
@@ -11,7 +11,7 @@ from deepgram import (
     LiveOptions
 )
 
-load_dotenv()
+load_env_file()
 
 MAX_RETRIES = 5
 

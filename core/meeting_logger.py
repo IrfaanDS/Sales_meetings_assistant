@@ -2,13 +2,12 @@ import os
 import json
 import logging
 from pathlib import Path
+from core.utils import get_app_data_dir
 from datetime import datetime
 
 def _get_app_data_dir():
     """Return the persistent AppData directory for the application."""
-    app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
-    app_data.mkdir(parents=True, exist_ok=True)
-    return app_data
+    return get_app_data_dir()
 
 class MeetingLogger:
     def __init__(self):

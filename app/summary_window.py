@@ -32,7 +32,7 @@ class SummaryWindow(QMainWindow):
         self.browser = QWebEngineView()
         # Use localhost in dev, or file:// in production if building static HTML
         # In this hybrid setup, FastAPI will serve the static React files on port 8765
-        self.browser.setUrl(QUrl("http://localhost:8765/"))
+        self.browser.setUrl(QUrl("http://127.0.0.1:8765/"))
         
         self.main_layout.addWidget(self.browser)
 

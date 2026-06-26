@@ -3,6 +3,7 @@ import json
 import logging
 import asyncio
 from pathlib import Path
+from core.utils import get_app_data_dir
 from datetime import datetime
 from typing import List, Set
 
@@ -95,7 +96,7 @@ def get_meetings():
 
 @app.get("/api/sessions/{session_id}")
 def get_session(session_id: str):
-    app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+    app_data = get_app_data_dir()
     session_dir = app_data / "sessions" / session_id
     if not session_dir.exists():
         return {"error": "Session not found"}

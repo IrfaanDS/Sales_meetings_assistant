@@ -3,6 +3,7 @@ import sys
 import uuid
 import logging
 from pathlib import Path
+from core.utils import get_app_data_dir
 from typing import List, Dict, Any
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -19,7 +20,7 @@ def _get_model_path():
 
 def _get_db_path():
     """Return a persistent Qdrant DB path inside AppData, never relative to cwd."""
-    app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+    app_data = get_app_data_dir()
     db_path = app_data / "qdrant_db"
     db_path.mkdir(parents=True, exist_ok=True)
     return str(db_path)

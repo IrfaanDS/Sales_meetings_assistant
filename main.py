@@ -3,8 +3,13 @@ import os
 import logging
 import traceback
 import platform
+import multiprocessing
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from core.utils import get_app_data_dir, load_env_file
+
+# Load the environment variables right at the start of the application
+load_env_file()
 
 # ---------------------------------------------------------------------------
 # Guard against None stdout/stderr (PyInstaller windowed mode sets them to None)
@@ -15,7 +20,7 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
-log_dir = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+log_dir = get_app_data_dir()
 log_dir.mkdir(parents=True, exist_ok=True)
 log_file = str(log_dir / "MASTER_DEBUG_LOG.txt")
 
@@ -89,4 +94,5 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

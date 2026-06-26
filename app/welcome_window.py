@@ -1,6 +1,7 @@
 import os
 import logging
 from pathlib import Path
+from core.utils import get_app_data_dir
 from datetime import datetime
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QFileDialog, QSystemTrayIcon, QMessageBox)
@@ -51,8 +52,12 @@ class WelcomeWindow(QMainWindow):
         
         # WebEngine View — renders the React Dashboard
         self.browser = QWebEngineView()
-        self.browser.setUrl(QUrl("http://localhost:8765/"))
         self.main_layout.addWidget(self.browser)
+        
+        # Check port status in the background using QTimer
+        self.startup_timer = QTimer(self)
+        self.startup_timer.timeout.connect(self._check_server_ready)
+        self.startup_timer.start(100) # Check every 100ms
         
         # Inject document & meeting data into the API state
         self._sync_data_to_api()
@@ -69,6 +74,19 @@ class WelcomeWindow(QMainWindow):
         # Check for updates after 3 seconds
         QTimer.singleShot(3000, self._perform_update_check)
 
+    def _check_server_ready(self):
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.1)
+                s.connect(("127.0.0.1", 8765))
+            # If connect succeeds, server is ready!
+            self.startup_timer.stop()
+            self.browser.setUrl(QUrl("http://127.0.0.1:8765/"))
+        except Exception:
+            # Server not ready yet, keep waiting
+            pass
+
     def _sync_data_to_api(self):
         """Push current documents and meetings into the FastAPI state."""
         # Documents
@@ -81,7 +99,7 @@ class WelcomeWindow(QMainWindow):
         
         # Meetings (sessions directories)
         meetings = []
-        app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+        app_data = get_app_data_dir()
         sessions_dir = app_data / "sessions"
         if sessions_dir.exists():
             # Get all subdirectories starting with 'Session_'
@@ -218,7 +236,7 @@ class WelcomeWindow(QMainWindow):
         self.browser.page().runJavaScript("window.location.reload()")
 
     def generate_session_summary(self, session_id):
-        app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+        app_data = get_app_data_dir()
         session_dir = app_data / "sessions" / session_id
         transcript_file = session_dir / "transcript.txt"
         
@@ -249,7 +267,7 @@ class WelcomeWindow(QMainWindow):
             
         try:
             import json
-            app_data = Path.home() / "AppData" / "Local" / "AI_Meetings_Assistant"
+            app_data = get_app_data_dir()
             summary_file = app_data / "sessions" / session_id / "summary.json"
             with open(summary_file, "w", encoding="utf-8") as f:
                 json.dump(summary_data, f, indent=2)

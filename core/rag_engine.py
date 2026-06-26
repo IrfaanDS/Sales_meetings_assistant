@@ -6,11 +6,11 @@ from typing import List, Optional, Callable, Dict, Any
 from pypdf import PdfReader
 from langchain_groq import ChatGroq
 from PyQt6.QtCore import QThread, pyqtSignal
-from dotenv import load_dotenv
+from core.utils import load_env_file
 
 from core.vector_store import QdrantVectorStore, get_vector_store
 
-load_dotenv()
+load_env_file()
 
 # ---------------------------------------------------------------------------
 # ARIA — Real-Time Sales Copilot System Prompt

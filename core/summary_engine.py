@@ -6,9 +6,9 @@ from datetime import datetime
 from pathlib import Path
 import google.generativeai as genai
 from fpdf import FPDF
-from dotenv import load_dotenv
+from core.utils import load_env_file
 
-load_dotenv()
+load_env_file()
 
 class MeetingSummaryEngine:
     def __init__(self):
